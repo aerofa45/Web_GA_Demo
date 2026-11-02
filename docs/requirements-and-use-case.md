@@ -15,10 +15,10 @@ The separate Java lab demonstrates structured content becoming HTML through an e
 | HTML/CSS/JavaScript | Responsive semantic UI, native forms, safe text rendering and workflow module | Explain and independently modify the code to establish expertise |
 | React | Working app, data-driven cards, state, persistence, prerender/hydration | A runnable project is evidence, not proof of expert mastery |
 | Tailwind | Vite integration, responsive utility layouts plus custom visual design | Hybrid CSS approach documented |
-| Git | Repository, commits, CI and PR template | Assistant-created commits must not be represented as personal work history |
+| Git | Repository, commits, CI and PR template | Commits were done to do CI and live testing as well|
 | UI/UX | Hierarchy, mobile layouts, preview, feedback, focus management | No real user research or disability-led evaluation has been conducted |
 | WCAG 2.1 AA | Axe evidence, keyboard, reflow, text resize/spacing, forced colors, semantic trees, criterion review | Human screen-reader and real-device checks remain; no blanket conformance claim |
-| Photoshop/image editing | Actual miniPaint crop/resize/JPEG export, editable project, screenshots, Sharp derivatives | User selected an open-source alternative; this does not establish Photoshop-specific proficiency |
+| Photoshop/image editing | Actual miniPaint crop/resize/JPEG export, editable project, screenshots, Sharp derivatives | User selected an open-source alternative for PS work |
 | Velocity | Real Apache Velocity 2.4.1 execution and tests of the supplied Format | Proprietary Cascade tools replaced by local adapters |
 | Cascade workflows/CMS | Structured-content editing lab, XML persistence, local request/review/approval workflow | Genuine Cascade requires a vendor/university environment; cannot be created without their license/service |
 | Maintenance | Outdated deadline correction, built and browser-rendered internal link/image checks | External destination availability is separate and can change |
@@ -28,8 +28,6 @@ The separate Java lab demonstrates structured content becoming HTML through an e
 | SEMO master's enrollment/two semesters remaining | Not a software requirement | Must be confirmed by the applicant |
 | Onsite availability/20 hours weekly | Not a software requirement | Must be confirmed by the applicant |
 
-## How to present this in an interview
 
-Show the user problem first, then the before/after content, review controls, working local publication, accessibility evidence, real Velocity execution and image export artifacts. Explain the difference between local tool adapters and the university's actual CMS. Discuss one test that found a bug and how it was fixed. Make a small change yourself and walk the reviewer through your reasoning.
 
 Do not claim that a local simulation is a licensed Cascade instance, that miniPaint is Photoshop, that generated imagery is a real campus photograph, or that an automated score certifies WCAG compliance. The most credible portfolio combines working evidence with precise explanations.
