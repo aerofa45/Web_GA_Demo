@@ -52,8 +52,9 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
   async function profile(user){const rows=await store.rest('forma_profiles',`user_id=${eq(user)}&select=data&limit=1`);if(!rows.length)throw new HttpError(404,'Portfolio not found.');return rows[0].data;}
   async function rate(req,action,max,window=3600000){
     const ip=trustProxy?String(req.headers['x-forwarded-for']||req.socket.remoteAddress).split(',')[0].trim():req.socket.remoteAddress;
-    const key=crypto.createHmac('sha256',store.key).update(action+':'+ip).digest('hex');
-    if(!await store.rpc('forma_limit',{p_key:key,p_now:Date.now(),p_window:window,p_max:max}))throw new HttpError(429,action.startsWith('gemini:')?'Forma Studio generation test limit reached for this network. Try again after the hourly window.':'Too many requests. Please try again later.');
+    const limitIdentity=action.startsWith('gemini:')?action:action+':'+ip;
+    const key=crypto.createHmac('sha256',store.key).update(limitIdentity).digest('hex');
+    if(!await store.rpc('forma_limit',{p_key:key,p_now:Date.now(),p_window:window,p_max:max}))throw new HttpError(429,action.startsWith('gemini:')?'Forma Studio generation limit reached for this account (20 attempts per hour). Try again after the hourly window.':'Too many requests. Please try again later.');
   }
   async function userBySlug(slug){const users=await store.rest('forma_users',`slug=${eq(slug)}&select=id,name,slug&limit=1`);if(!users.length)throw new HttpError(404,'Portfolio not found.');return users[0];}
   const demo=sanitize({...initial('Jordan Ellis','demo'),headline:'Design engineer · Creative technologist',location:'Fictional example',bio:'This read-only example shows how a portfolio can present research, projects, and experience. Create an account to build your own.',featuredText:'Thoughtful ideas. Useful digital experiences.',heroImage:'https://images.unsplash.com/photo-1519608487953-e999c86e7455?auto=format&fit=crop&w=1800&q=80'},{name:'Jordan Ellis'});
