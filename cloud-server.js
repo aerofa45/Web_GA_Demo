@@ -88,6 +88,8 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
     if(!linked.length)throw new HttpError(409,'Reconnect Google Drive before removing shared videos.');
     const tokens=await googleToken({client_id:process.env.GOOGLE_CLIENT_ID,client_secret:process.env.GOOGLE_CLIENT_SECRET,refresh_token:decryptGoogle(linked[0].refresh_cipher),grant_type:'refresh_token'});
     for(const grant of expired){
+      const others=await store.rest('forma_drive_video_grants','email='+eq(grant.email)+'&file_id='+eq(grant.file_id)+'&select=course_id');
+      if(others.some(r=>r.course_id!==courseId)){await store.rest('forma_drive_video_grants','course_id='+eq(courseId)+'&email='+eq(grant.email)+'&file_id='+eq(grant.file_id),'DELETE');continue;}
       const uri='https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(grant.file_id)+'/permissions/'+encodeURIComponent(grant.permission_id);
       const response=await fetcher(uri,{method:'DELETE',headers:{Authorization:'Bearer '+tokens.access_token},signal:AbortSignal.timeout(15000)});
       if(!response.ok&&response.status!==404)throw new HttpError(502,'Google Drive revocation failed. Course changes were not saved.');
@@ -349,7 +351,8 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
                 // Never trust an email entered by the instructor alone: it must come from a registered request.
                 for(const fileId of files){
                   if(prior.some(g=>g.file_id===fileId))continue;
-                  const grant=await google(fileId,null,'POST');
+                  const shared=await store.rest('forma_drive_video_grants','email='+eq(email)+'&file_id='+eq(fileId)+'&select=permission_id&limit=1');
+                  const grant=shared.length?{id:shared[0].permission_id}:await google(fileId,null,'POST');
                   if(!grant.id)throw new HttpError(502,'Google did not return a permission ID.');
                   await store.rest('forma_drive_video_grants','','POST',{course_id:courseId,email,file_id:fileId,permission_id:grant.id,created:Date.now()});
                 }
@@ -357,7 +360,8 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
                 // Revoke app entitlement first, then remove any provider grants. Errors stay visible for retry.
                 await store.rest('forma_course_enrollments','course_id='+eq(courseId)+'&email='+eq(email),'PATCH',{status:'revoked',updated:Date.now()});
                 for(const grant of prior){
-                  await google(grant.file_id,grant.permission_id,'DELETE');
+                  const others=await store.rest('forma_drive_video_grants','email='+eq(email)+'&file_id='+eq(grant.file_id)+'&select=course_id');
+                  if(!others.some(r=>r.course_id!==courseId))await google(grant.file_id,grant.permission_id,'DELETE');
                   await store.rest('forma_drive_video_grants','course_id='+eq(courseId)+'&email='+eq(email)+'&file_id='+eq(grant.file_id),'DELETE');
                 }
                 return json(res,200,{status:'revoked'});
