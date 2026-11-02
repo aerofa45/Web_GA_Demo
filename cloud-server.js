@@ -508,7 +508,8 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
             const late=items[0].due_at!==null&&Number(rows[0].submitted_at)>Number(items[0].due_at);
             const adjusted=late?Math.round(score*(1-Number(items[0].late_penalty_percent||0)/100)*100)/100:score;
             await store.rest('forma_submissions','assignment_id='+eq(assignmentId)+'&student_id='+eq(studentId),'PATCH',{score:adjusted,feedback,graded_at:now});
-            return json(res,200,{ok:true});
+            await store.rest('forma_notifications','','POST',{id:id(),user_id:studentId,course_id:courseId,message:'An assignment has been graded. Check your gradebook.',created:now,read_at:null});
+            return json(res,200,{ok:true,score:adjusted});
           }
           if(method==='POST'&&kind==='quizzes'){
             admin();const b=await body(),title=clean(b.title,140),questions=b.questions,maxAttempts=Number(b.maxAttempts||1);
