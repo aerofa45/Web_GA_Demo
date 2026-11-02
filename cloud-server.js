@@ -109,7 +109,7 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
       // Test-only Stripe endpoint: verify the raw body before parsing JSON.
       if(p==='/api/stripe-test/webhook'&&method==='POST'){
         const secret=process.env.STRIPE_TEST_WEBHOOK_SECRET||'',key=process.env.STRIPE_TEST_SECRET_KEY||'';
-        if(!/^sk_test_/.test(key)||!/^whsec_/.test(secret))throw new HttpError(503,'Stripe test mode is not configured.');
+        if(! /^(sk_test_|rk_test_)/.test(key)||!/^whsec_/.test(secret))throw new HttpError(503,'Stripe test mode is not configured.');
         const header=String(req.headers['stripe-signature']||'');
         const timestamp=header.match(/(?:^|,)t=(\d+)/)?.[1];
         const signatures=[...header.matchAll(/(?:^|,)v1=([a-f0-9]{64})/g)].map(x=>x[1]);
@@ -159,7 +159,7 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
         }
         if(p==='/api/stripe-test/checkout'&&method==='POST'){
           const key=process.env.STRIPE_TEST_SECRET_KEY||'';
-          if(!/^sk_test_/.test(key))throw new HttpError(503,'Stripe TEST secret key is not configured. Live payments are disabled.');
+          if(! /^(sk_test_|rk_test_)/.test(key))throw new HttpError(503,'Stripe TEST secret key is not configured. Live payments are disabled.');
           const user=await auth(req),b=await read(req),courseId=String(b.courseId||'');
           if(!/^[a-f0-9]{48}$/.test(courseId))throw new HttpError(400,'Invalid course.');
           const courses=await store.rest('forma_course_drafts','id='+eq(courseId)+'&select=id,user_id,title,published,outline&limit=1');
