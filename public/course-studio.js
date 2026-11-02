@@ -1,13 +1,13 @@
 'use strict';
 const el=id=>document.getElementById(id);
-let active=null,outline={chapters:[]},published=false,generating=false,loading=0;
+let active=null,outline={chapters:[]},published=false,generating=false,loading=0,directPdf=null;
 const say=msg=>{el('message').textContent=msg;el('generate-status').textContent=msg;};
 async function api(url,opts={}){const r=await fetch(url,{credentials:'same-origin',headers:{'Content-Type':'application/json'},...opts});const data=await r.json().catch(()=>({}));if(!r.ok)throw Error(data.error||'Request failed ('+r.status+')');return data;}
 function element(tag,value,callback){const x=document.createElement(tag);if(value!==undefined)x.textContent=value;if(callback){x.type='button';x.addEventListener('click',callback);}return x;}
 async function list(){const [d,trash]=await Promise.all([api('/api/course-drafts'),api('/api/course-drafts?archived=true')]);el('courses').replaceChildren();for(const c of d.courses)el('courses').append(element('button',c.title+(c.published?' · Published':' · Draft'),()=>load(c.id).catch(e=>say(e.message))));el('trash').replaceChildren();for(const c of trash.courses){const row=element('p',c.title+' ');row.append(element('button','Restore '+c.title,async()=>{try{await api('/api/course-drafts/'+c.id+'/restore',{method:'POST',body:'{}'});await list();say('Course restored as a private draft.');}catch(e){say(e.message);}}));el('trash').append(row);}}
-async function load(id){const version=++loading,d=await api('/api/course-drafts/'+id);if(version!==loading)return;active=id;outline=d.course.outline||{chapters:[]};published=d.course.published;el('material').value='';el('course-title').value=d.course.title;el('editor').hidden=false;publication();render();say('Editing '+d.course.title);}
+async function load(id){const version=++loading,d=await api('/api/course-drafts/'+id);if(version!==loading)return;active=id;outline=d.course.outline||{chapters:[]};published=d.course.published;directPdf=null;el('material').value='';el('course-title').value=d.course.title;el('editor').hidden=false;publication();render();say('Editing '+d.course.title);}
 function publication(){el('publication').textContent=published?'Published publicly':'Private draft';el('publish').textContent=published?'Unpublish course':'Publish publicly';el('preview').href='/course/'+active;}
-function sources(){const select=el('material'),old=select.value;select.replaceChildren();const notes=element('option','Typed notes only');notes.value='';select.append(notes);outline.chapters.forEach((c,i)=>c.lessons.forEach((l,j)=>{const o=element('option',c.title+' / '+l.title+(l.pdfId?' (PDF)':' (text)'));o.value=i+':'+j;select.append(o);}));select.value=old;if(select.selectedIndex<0)select.value='';}
+function sources(){const select=el('material'),old=select.value;select.replaceChildren();const notes=element('option','Typed notes only');notes.value='';select.append(notes);const uploadOption=element('option','Upload a new PDF for Gemini');uploadOption.value='upload';select.append(uploadOption);if(directPdf){const directOption=element('option','Uploaded PDF: '+directPdf.name);directOption.value='direct';select.append(directOption);}outline.chapters.forEach((c,i)=>c.lessons.forEach((l,j)=>{const o=element('option',c.title+' / '+l.title+(l.pdfId?' (PDF)':' (text)'));o.value=i+':'+j;select.append(o);}));select.value=old;if(select.selectedIndex<0)select.value='';}
 function input(tag,value,placeholder,change){const x=element(tag);x.value=value||'';x.placeholder=placeholder;x.setAttribute('aria-label',placeholder);x.addEventListener('input',()=>change(x.value));return x;}
 function render(){sources();const root=el('chapters');root.replaceChildren();outline.chapters.forEach((c,i)=>{
  const section=element('section');section.append(input('input',c.title,'Chapter title',v=>c.title=v));
@@ -30,11 +30,11 @@ function render(){sources();const root=el('chapters');root.replaceChildren();out
 async function save(nextPublished=published){if(!active)throw Error('Select a course first.');const courseId=active;await api('/api/course-drafts/'+courseId,{method:'PUT',body:JSON.stringify({title:el('course-title').value,outline,published:nextPublished})});if(active===courseId){published=nextPublished;publication();}await list();say('Course saved'+(nextPublished?' and published.':'.'));}
 async function generate(target={scope:'course'}){
  if(generating)return;try{if(!active)throw Error('Select a course first.');const courseId=active,snapshot=JSON.stringify(outline),selection=el('material').value;
- const [i,j]=selection.split(':').map(Number),selected=selection?outline.chapters[i]?.lessons[j]:null;
+ if(selection==='upload')throw Error('Choose a PDF first.');const [i,j]=selection.split(':').map(Number),selected=selection&&selection!=='direct'?outline.chapters[i]?.lessons[j]:null;
  const chapter=outline.chapters[target.chapter],lesson=chapter?.lessons[target.lesson];
  const targetChapter=target.scope==='lesson'?{title:chapter.title,lessons:[lesson]}:target.scope==='chapter'?{title:chapter.title,lessons:chapter.lessons.filter(l=>l.type!=='youtube')}:undefined;
  if(targetChapter&&!targetChapter.lessons.length)throw Error('Add a text or quiz lesson before regenerating.');
- const material=selected||(target.scope==='lesson'?lesson:null);
+ const material=selection==='direct'?directPdf:selected||(target.scope==='lesson'?lesson:null);
  const context=material?.content||(targetChapter?targetChapter.lessons.map(l=>l.content).join('\n'):'');
  generating=true;el('generate').disabled=true;say('Generating '+target.scope+'...');
  const d=await api('/api/course-generate',{method:'POST',body:JSON.stringify({source:[el('source').value,context].filter(Boolean).join('\n'),topic:el('topic').value,pdfId:material?.pdfId,courseId,scope:target.scope,target:targetChapter})});
@@ -42,6 +42,8 @@ async function generate(target={scope:'course'}){
  outline=CourseTools.applyGeneration(outline,d.outline,target);render();say(target.scope==='course'?'Generated chapters added. Review, then Save course.':'Selected '+target.scope+' regenerated. Other lessons and attachments were preserved. Review, then Save course.');
  }catch(e){say(e.message);}finally{generating=false;el('generate').disabled=false;}
 }
+el('material').addEventListener('change',()=>{if(el('material').value==='upload')el('gemini-pdf-file').click();});
+el('gemini-pdf-file').addEventListener('change',async()=>{const inputFile=el('gemini-pdf-file').files?.[0];if(!inputFile)return;const courseId=active;try{if(!courseId)throw Error('Create or select a course first.');if(inputFile.size>1800000)throw Error('PDF must be less than 1.8 MB.');el('gemini-pdf-status').textContent='Uploading PDF...';const data=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(Error('Could not read PDF.'));reader.readAsDataURL(inputFile);});const result=await api('/api/course-pdf',{method:'POST',body:JSON.stringify({courseId,name:inputFile.name,data})});if(active!==courseId)throw Error('Course changed during upload. Select the original course to use the PDF.');directPdf={pdfId:result.file.id,name:result.file.name};sources();el('material').value='direct';el('gemini-pdf-status').textContent='Ready: '+directPdf.name+'. Click Generate outline; no typed notes required.';say('PDF uploaded for Gemini.');}catch(e){el('gemini-pdf-status').textContent=e.message;say(e.message);sources();}finally{el('gemini-pdf-file').value='';}});
 el('create').addEventListener('click',async()=>{try{const d=await api('/api/course-drafts',{method:'POST',body:JSON.stringify({title:el('new-title').value})});await list();await load(d.course.id);}catch(e){say(e.message);}});
 el('add-chapter').addEventListener('click',()=>{outline.chapters.push({title:'New chapter',lessons:[]});render();});
 el('save').addEventListener('click',()=>save().catch(e=>say(e.message)));
