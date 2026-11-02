@@ -376,7 +376,7 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
           const course=rows[0];
           if(!course||course.outline?.archived||(!course.published&&course.user_id!==viewer?.id))throw new HttpError(404,'Course not found.');
           const owner=course.user_id===viewer?.id;
-          const outline={chapters:course.outline.chapters.map(c=>({title:c.title,lessons:c.lessons.map(l=>({title:l.title,type:l.type,content:l.content,...(owner&&l.pdfId?{pdfId:l.pdfId,pdfName:l.pdfName}:{})}))}))};
+          const outline={chapters:course.outline.chapters.map(c=>({title:c.title,lessons:c.lessons.map(l=>({title:l.title,type:l.type,content:l.content,hasDriveVideo:Boolean(l.driveFile),...(owner&&l.pdfId?{pdfId:l.pdfId,pdfName:l.pdfName}:{})}))}))};
           return json(res,200,{course:{id:course.id,title:course.title,published:course.published,outline},owner});
         }
         // Server-only diagnostic. Never expose the configured Gemini API key.
