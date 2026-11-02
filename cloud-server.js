@@ -125,7 +125,7 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
         const existing=await store.rest('forma_google_connections',`user_id=${eq(user.id)}&role=${eq(role)}&select=user_id&limit=1`);
         if(existing.length)await store.rest('forma_google_connections',`user_id=${eq(user.id)}&role=${eq(role)}`,'PATCH',record);
         else await store.rest('forma_google_connections','','POST',record);
-        res.writeHead(303,{Location:role==='student'?'/course-studio?student_google=verified':'/course-studio?google=connected','Cache-Control':'no-store'});return res.end();
+        res.writeHead(303,{Location:role==='student'?'/app?student_google=verified':'/course-studio?google=connected','Cache-Control':'no-store'});return res.end();
       }
       if(p.startsWith('/api/')){
         if(!['GET','HEAD'].includes(method)){
