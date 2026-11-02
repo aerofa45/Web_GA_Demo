@@ -30,3 +30,10 @@ Syntax checks passed for cloud-server.js and public/course-studio.js. git diff -
 ## Pending work and access
 The staging course page redirects to login in the available in-app browser. An authenticated testing session is needed for real text/PDF generation and save/reopen verification without obtaining secrets. Render runtime logs were opened; no actual upstream Gemini response has yet been established. Do not attribute the live failure to quota without upstream evidence.
 Individual lesson/chapter regeneration, assignments, publishing, YouTube embeds, upload cleanup, concurrency-safe saves, full browser regression, hosted migration checks, and live generation remain Phase 1 work. Drive and the student LMS should follow stability verification. No production branch, Supabase project, billing, or payment configuration was changed.
+
+## Authenticated hosted checks
+On 2026-11-02, created isolated draft QA Phase 1 - Probability. Real text generation returned model unavailable; Render runtime log confirmed Gemini upstream status: 404 NOT_FOUND. Uploaded a one-page fictional probability PDF, saved a manual lesson and attachment, reloaded the page, and reopened the course: lesson content and PDF association persisted. PDF-only generation also returned model unavailable. No successful live generation is claimed. No existing course or portfolio was edited.
+
+Added optional server-only GEMINI_MODEL configuration, retaining the existing default until an available model is selected. Invalid model paths fail closed. Tests: 13 passed, 0 failed after allowing local test-server connections. Initial test attempt was blocked by local network permission (EACCES); code tests passed after permission was granted. Google documentation says gemini-2.5-flash access is limited to established users; this is consistent with, but does not conclusively explain, the upstream 404. Source: https://ai.google.dev/gemini-api/docs/models/gemini-2.5-flash
+
+Deployment remains pending. Changes are on the feature branch; no test service environment settings or production resources were changed.

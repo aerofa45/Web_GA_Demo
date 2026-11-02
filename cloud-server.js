@@ -29,7 +29,7 @@ function createStore(url,key,fetcher=fetch){
     removeImages:prefixes=>request('/storage/v1/object/forma-images',{method:'DELETE',body:JSON.stringify({prefixes}),headers:{'Content-Type':'application/json'}})};
 }
 
-function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fetch,geminiKey=process.env.GEMINI_API_KEY}={}){
+function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fetch,geminiKey=process.env.GEMINI_API_KEY,geminiModel=process.env.GEMINI_MODEL||'gemini-2.5-flash'}={}){
   const sessionName=production?'__Host-forma_session':'forma_session';
   const cookie=(token,age=TTL/1000)=>`${sessionName}=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${age}${production?'; Secure':''}`;
   const json=(res,status,value,headers={})=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...headers});res.end(JSON.stringify(value));};
@@ -182,6 +182,7 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
           const user=await auth(req);
           const b=await read(req);const source=clean(b.source,16000),topic=clean(b.topic,180);
           if(source.length<80&&!b.pdfId)throw new HttpError(400,'Paste at least 80 characters of notes or choose an attached PDF.');
+          if(!/^gemini-[a-z0-9.-]+$/.test(geminiModel))throw new HttpError(503,'Gemini model configuration is invalid.');
           const apiKey=geminiKey;if(!apiKey)throw new HttpError(503,'Gemini is not configured.');
           let pdfPart=null;
           if(b.pdfId){
@@ -198,7 +199,7 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
           await rate(req,'gemini:'+user.id,20,3600000);
           const prompt='You are creating an editable educational course. Return ONLY JSON of shape {"chapters":[{"title":"...","lessons":[{"title":"...","type":"text","content":"..."},{"title":"...","type":"quiz","content":"Questions with answers"}]}]}. Create 2-5 concise chapters grounded only in supplied material. Never include markdown fences. Topic: '+topic+'\\nNotes: '+source;
           let response;
-          try{response=await fetcher('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':apiKey},body:JSON.stringify({contents:[{parts:[{text:prompt},...(pdfPart?[pdfPart]:[])]}],generationConfig:{responseMimeType:'application/json'}}),signal:AbortSignal.timeout(45000)});
+          try{response=await fetcher('https://generativelanguage.googleapis.com/v1beta/models/'+geminiModel+':generateContent',{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':apiKey},body:JSON.stringify({contents:[{parts:[{text:prompt},...(pdfPart?[pdfPart]:[])]}],generationConfig:{responseMimeType:'application/json'}}),signal:AbortSignal.timeout(45000)});
           }catch(e){const timeout=['TimeoutError','AbortError'].includes(e.name);throw new HttpError(timeout?504:502,timeout?'Gemini timed out. Please try again.':'Could not reach Gemini. Please try again.');}
           if(!response.ok){
             const errorBody=await response.json().catch(()=>({}));
@@ -207,7 +208,7 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
             if(response.status===429)throw new HttpError(429,'Gemini rate limit or quota reached. Check Google AI Studio usage and billing.');
             if(response.status===400)throw new HttpError(502,'Gemini rejected the request. The PDF or model input may be unsupported.');
             if(response.status===401||response.status===403)throw new HttpError(502,'Gemini API key is invalid, restricted, or lacks permission.');
-            if(response.status===404)throw new HttpError(502,'Gemini model is not available for this API key.');
+            if(response.status===404)throw new HttpError(502,'The configured Gemini model is unavailable. Check GEMINI_MODEL against models available to this API key.');
             throw new HttpError(502,'Gemini temporarily failed (HTTP '+response.status+').');
           }
           const data=await response.json().catch(()=>{throw new HttpError(502,'Gemini returned an invalid response.');});
