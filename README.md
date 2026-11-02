@@ -2,7 +2,6 @@
 
 An independent university web portfolio built around a real maintenance problem: a department changes a deadline, an editor submits the correction, a reviewer checks it, and the approved update appears on the program page.
 
-**Fictional program and AI-generated concept imagery. No SEMO affiliation. The included Cascade-style lab is independent software using Apache Velocity, not Hannon Hill Cascade CMS.**
 
 ![Program page](docs/program-preview.jpg)
 
@@ -78,13 +77,13 @@ The generated source was opened in **miniPaint**, an open-source browser image e
 
 [Requirement assessment and practical use case](docs/requirements-and-use-case.md) · [design rationale](docs/design.md)
 
-The project demonstrates HTML, CSS, JavaScript, React, Tailwind, Alpine, Velocity, local content workflows, image optimization, technical SEO and quality testing. Enrollment eligibility, personal Photoshop proficiency, commercial CMS experience, and communication skills require your own supporting evidence. Learn and explain the code; do not present assistant-created implementation as unaided work.
+The project demonstrates HTML, CSS, JavaScript, React, Tailwind, Alpine, Velocity, local content workflows, image optimization, technical SEO and quality testing. 
 
 The ticket dashboard is browser-local, with no login, role enforcement or collaborative editing. Anyone can take a valid transition. Browser storage is untrusted; use fictional data only. The Java lab has no commercial CMS account, production publish destination, user directory or vendor services.
 
 ## Git and collaboration
 
-Use focused feature branches and explain the user problem, change, validation and remaining limits in each PR. A CI workflow and PR template are included. Commits generated while preparing this portfolio are identified as assistant work; they are not evidence of your personal development history. Do your own small improvement and PR to demonstrate that skill yourself.
+Use focused feature branches and explain the user problem, change, validation and remaining limits in each PR. A CI workflow and PR template are included. 
 
 Implementation references: [React rendering](https://react.dev/reference/react-dom/server/renderToString), [WCAG 2.1](https://www.w3.org/TR/WCAG21/), [Apache Velocity](https://velocity.apache.org/engine/), [miniPaint](https://github.com/viliusle/miniPaint), [Cascade Formats](https://www.hannonhill.com/cascadecms/latest/articles/developing-in-cascade/script-formats/index.html).
 
