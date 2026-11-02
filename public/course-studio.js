@@ -5,7 +5,32 @@ const say=msg=>{el('message').textContent=msg;el('generate-status').textContent=
 async function api(url,opts={}){const r=await fetch(url,{credentials:'same-origin',headers:{'Content-Type':'application/json'},...opts});const data=await r.json().catch(()=>({}));if(!r.ok)throw Error(data.error||'Request failed ('+r.status+')');return data;}
 function element(tag,value,callback){const x=document.createElement(tag);if(value!==undefined)x.textContent=value;if(callback){x.type='button';x.addEventListener('click',callback);}return x;}
 async function list(){const [d,trash]=await Promise.all([api('/api/course-drafts'),api('/api/course-drafts?archived=true')]);el('courses').replaceChildren();for(const c of d.courses)el('courses').append(element('button',c.title+(c.published?' · Published':' · Draft'),()=>load(c.id).catch(e=>say(e.message))));el('trash').replaceChildren();for(const c of trash.courses){const row=element('p',c.title+' ');row.append(element('button','Restore '+c.title,async()=>{try{await api('/api/course-drafts/'+c.id+'/restore',{method:'POST',body:'{}'});await list();say('Course restored as a private draft.');}catch(e){say(e.message);}}));el('trash').append(row);}}
-async function load(id){const version=++loading,d=await api('/api/course-drafts/'+id);if(version!==loading)return;active=id;outline=d.course.outline||{chapters:[]};published=d.course.published;directPdf=null;el('material').value='';el('course-title').value=d.course.title;el('editor').hidden=false;publication();render();say('Editing '+d.course.title);}
+async function enrollments(){
+ const root=el('enrollment-list');root.replaceChildren();
+ if(!active){root.textContent='Select a course first.';return;}
+ try{
+  const courseId=active,d=await api('/api/course-enrollments/'+courseId);
+  if(active!==courseId)return;
+  if(!d.enrollments.length){root.textContent='No enrollment requests yet.';return;}
+  for(const student of d.enrollments){
+   const row=element('p',student.email+' — '+student.status+' ');
+   for(const decision of ['approve','revoke']){
+    if(decision==='approve'&&student.status==='approved')continue;
+    if(decision==='revoke'&&student.status==='revoked')continue;
+    row.append(element('button',decision==='approve'?'Approve':'Revoke',async()=>{
+     try{
+      if(!window.confirm((decision==='approve'?'Grant':'Revoke')+' Drive access for '+student.email+'?'))return;
+      await api('/api/course-enrollments/'+courseId+'/decision',{method:'POST',body:JSON.stringify({email:student.email,decision})});
+      if(active===courseId){say('Enrollment '+decision+' succeeded for '+student.email+'.');await enrollments();}
+     }catch(error){say(error.message);}
+    }));
+   }
+   root.append(row);
+  }
+ }catch(error){root.textContent=error.message;}
+}
+el('enrollment-refresh').addEventListener('click',enrollments);
+async function load(id){const version=++loading,d=await api('/api/course-drafts/'+id);if(version!==loading)return;active=id;outline=d.course.outline||{chapters:[]};published=d.course.published;directPdf=null;el('material').value='';el('course-title').value=d.course.title;el('editor').hidden=false;publication();render();enrollments();say('Editing '+d.course.title);}
 function publication(){el('publication').textContent=published?'Published publicly':'Private draft';el('publish').textContent=published?'Unpublish course':'Publish publicly';el('preview').href='/course/'+active;}
 function sources(){const select=el('material'),old=select.value;select.replaceChildren();const notes=element('option','Typed notes only');notes.value='';select.append(notes);const uploadOption=element('option','Upload a new PDF for Gemini');uploadOption.value='upload';select.append(uploadOption);if(directPdf){const directOption=element('option','Uploaded PDF: '+directPdf.name);directOption.value='direct';select.append(directOption);}outline.chapters.forEach((c,i)=>c.lessons.forEach((l,j)=>{const o=element('option',c.title+' / '+l.title+(l.pdfId?' (PDF)':' (text)'));o.value=i+':'+j;select.append(o);}));select.value=old;if(select.selectedIndex<0)select.value='';}
 function input(tag,value,placeholder,change){const x=element(tag);x.value=value||'';x.placeholder=placeholder;x.setAttribute('aria-label',placeholder);x.addEventListener('input',()=>change(x.value));return x;}
