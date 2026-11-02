@@ -30,4 +30,4 @@ The separate Java lab demonstrates structured content becoming HTML through an e
 
 
 
-Do not claim that a local simulation is a licensed Cascade instance, that miniPaint is Photoshop, that generated imagery is a real campus photograph, or that an automated score certifies WCAG compliance. The most credible portfolio combines working evidence with precise explanations.
+
