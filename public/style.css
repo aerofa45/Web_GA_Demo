@@ -52,3 +52,5 @@
 
 /* Structured editing / dedicated public presentation */
 .content-editor {border-radius:16px;overflow:hidden}.content-editor>.muted{padding:0 16px}.content-editor .entry{border-left:3px solid var(--accent,#72ead3);padding:18px;margin:14px 0;border-radius:12px}.entry-meta{font-size:.88rem;line-height:1.65;opacity:.8;margin:12px 0}.rich-entry{min-width:0}.rich-entry>.entry-meta,.rich-entry>p{padding:0 18px}.rich-entry video{width:100%;border-radius:12px}.articleentry{max-width:850px}.portfolio-table th{text-align:left}.portfolio-table td{vertical-align:top}.portfolio-table td p{font-size:.85rem;opacity:.7}
+
+.skip-link{position:absolute;left:1rem;top:-100px;z-index:1000;padding:12px;background:#fff;color:#07121d}.skip-link:focus{top:1rem}:focus-visible{outline:3px solid #f7c96e;outline-offset:4px}@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important;animation:none!important}}
