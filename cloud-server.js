@@ -59,6 +59,17 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
   async function userBySlug(slug){const users=await store.rest('forma_users',`slug=${eq(slug)}&select=id,name,slug&limit=1`);if(!users.length)throw new HttpError(404,'Portfolio not found.');return users[0];}
   const demo=sanitize({...initial('Jordan Ellis','demo'),headline:'Design engineer · Creative technologist',location:'Fictional example',bio:'This read-only example shows how a portfolio can present research, projects, and experience. Create an account to build your own.',featuredText:'Thoughtful ideas. Useful digital experiences.',heroImage:'https://images.unsplash.com/photo-1519608487953-e999c86e7455?auto=format&fit=crop&w=1800&q=80'},{name:'Jordan Ellis'});
 
+  const googleOrigin=()=>origin||process.env.RENDER_EXTERNAL_URL||'';
+  const googleRedirect=()=>googleOrigin()+'/api/google/callback';
+  const oauthReady=()=>Boolean(process.env.GOOGLE_CLIENT_ID&&process.env.GOOGLE_CLIENT_SECRET&&/^[a-f0-9]{64}$/i.test(process.env.GOOGLE_TOKEN_ENCRYPTION_KEY||'')&&/^https:\/\//.test(googleOrigin()));
+  const cipherSecret=()=>Buffer.from(process.env.GOOGLE_TOKEN_ENCRYPTION_KEY,'hex');
+  function encryptGoogle(value){const iv=crypto.randomBytes(12),enc=crypto.createCipheriv('aes-256-gcm',cipherSecret(),iv);const data=Buffer.concat([enc.update(value,'utf8'),enc.final()]);return Buffer.concat([iv,enc.getAuthTag(),data]).toString('base64');}
+  function decryptGoogle(value){const buf=Buffer.from(value,'base64'),dec=crypto.createDecipheriv('aes-256-gcm',cipherSecret(),buf.subarray(0,12));dec.setAuthTag(buf.subarray(12,28));return Buffer.concat([dec.update(buf.subarray(28)),dec.final()]).toString('utf8');}
+  async function googleToken(params){
+    let response;try{response=await fetcher('https://oauth2.googleapis.com/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(params),signal:AbortSignal.timeout(15000)});}catch{throw new HttpError(502,'Google authorization request failed.');}
+    if(!response.ok)throw new HttpError(502,'Google authorization failed. Reconnect Google Drive.');
+    return response.json();
+  }
   return async function handler(req,res){
     res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','strict-origin-when-cross-origin');
     res.setHeader('X-Frame-Options','DENY');
@@ -69,6 +80,25 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
       const url=new URL(req.url,'http://localhost');const p=url.pathname;const method=req.method;
       if(!['GET','HEAD','POST','PUT','DELETE'].includes(method))throw new HttpError(405,'Method not allowed.');
       if(p==='/healthz'){await store.rest('forma_users','select=id&limit=0');return json(res,200,{status:'ok',mode:'portfolio-beta',payments:false});}
+      // OAuth callback is GET and requires an existing application session.
+      if(p==='/api/google/callback'&&method==='GET'){
+        const user=await auth(req);if(!oauthReady())throw new HttpError(503,'Google connection is not configured.');
+        const state=String(url.searchParams.get('state')||''),code=String(url.searchParams.get('code')||'');
+        if(!/^[a-f0-9]{48}$/.test(state)||!code)throw new HttpError(400,'Google authorization was cancelled or invalid.');
+        const rows=await store.rest('forma_google_oauth_states',`state=${eq(state)}&user_id=${eq(user.id)}&select=*&limit=1`);
+        if(!rows.length||Date.now()-rows[0].created>600000)throw new HttpError(403,'Google authorization expired. Start again.');
+        await store.rest('forma_google_oauth_states',`state=${eq(state)}&user_id=${eq(user.id)}`,'DELETE');
+        const tokens=await googleToken({client_id:process.env.GOOGLE_CLIENT_ID,client_secret:process.env.GOOGLE_CLIENT_SECRET,code,grant_type:'authorization_code',redirect_uri:googleRedirect(),code_verifier:rows[0].verifier});
+        if(!tokens.refresh_token||!tokens.access_token)throw new HttpError(400,'Google did not provide offline access. Disconnect this app in Google account permissions and reconnect.');
+        const identity=await fetcher('https://openidconnect.googleapis.com/v1/userinfo',{headers:{Authorization:'Bearer '+tokens.access_token},signal:AbortSignal.timeout(12000)});
+        if(!identity.ok)throw new HttpError(502,'Unable to verify Google account.');
+        const info=await identity.json();if(!info.sub||!info.email||info.email_verified===false)throw new HttpError(403,'A verified Google email is required.');
+        const record={user_id:user.id,role:'instructor',email:info.email,google_sub:info.sub,refresh_cipher:encryptGoogle(tokens.refresh_token),updated:Date.now()};
+        const existing=await store.rest('forma_google_connections',`user_id=${eq(user.id)}&role=eq.instructor&select=user_id&limit=1`);
+        if(existing.length)await store.rest('forma_google_connections',`user_id=${eq(user.id)}&role=eq.instructor`,'PATCH',record);
+        else await store.rest('forma_google_connections','','POST',record);
+        res.writeHead(303,{Location:'/course-studio?google=connected','Cache-Control':'no-store'});return res.end();
+      }
       if(p.startsWith('/api/')){
         if(!['GET','HEAD'].includes(method)){
           const expected=origin||(production?process.env.RENDER_EXTERNAL_URL:'');
@@ -124,6 +154,39 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
           await store.rest('forma_messages','','POST',{id:id(),user_id:user.id,sender,email,message,created:Date.now()});return json(res,201,{ok:true});
         }
 
+        if(p==='/api/google/status'&&method==='GET'){
+          const user=await auth(req);
+          const rows=await store.rest('forma_google_connections',`user_id=${eq(user.id)}&role=eq.instructor&select=email&limit=1`);
+          return json(res,200,{connected:rows.length>0,email:rows[0]?.email||null,pickerConfigured:Boolean(process.env.GOOGLE_PICKER_API_KEY),oauthConfigured:oauthReady()});
+        }
+        if(p==='/api/google/connect'&&method==='GET'){
+          const user=await auth(req);if(!oauthReady())throw new HttpError(503,'Google OAuth credentials are missing.');
+          const state=id(),verifier=crypto.randomBytes(32).toString('base64url');
+          await store.rest('forma_google_oauth_states','','POST',{state,user_id:user.id,role:'instructor',verifier,created:Date.now()});
+          const challenge=crypto.createHash('sha256').update(verifier).digest('base64url');
+          const params=new URLSearchParams({client_id:process.env.GOOGLE_CLIENT_ID,redirect_uri:googleRedirect(),response_type:'code',scope:'openid email profile https://www.googleapis.com/auth/drive.file',access_type:'offline',prompt:'consent',code_challenge:challenge,code_challenge_method:'S256',state});
+          return json(res,200,{authorizationUrl:'https://accounts.google.com/o/oauth2/v2/auth?'+params.toString()});
+        }
+        if(p==='/api/google/picker-config'&&method==='GET'){
+          const user=await auth(req);if(!oauthReady()||!process.env.GOOGLE_PICKER_API_KEY)throw new HttpError(503,'Google Picker is not configured.');
+          const rows=await store.rest('forma_google_connections',`user_id=${eq(user.id)}&role=eq.instructor&select=refresh_cipher&limit=1`);
+          if(!rows.length)throw new HttpError(409,'Connect Google Drive first.');
+          const tokens=await googleToken({client_id:process.env.GOOGLE_CLIENT_ID,client_secret:process.env.GOOGLE_CLIENT_SECRET,refresh_token:decryptGoogle(rows[0].refresh_cipher),grant_type:'refresh_token'});
+          if(!tokens.access_token)throw new HttpError(502,'Could not refresh Google Drive authorization.');
+          return json(res,200,{apiKey:process.env.GOOGLE_PICKER_API_KEY,clientId:process.env.GOOGLE_CLIENT_ID,accessToken:tokens.access_token,appId:process.env.GOOGLE_PROJECT_NUMBER||null});
+        }
+        if(p==='/api/google/selected-file'&&method==='POST'){
+          const user=await auth(req),b=await read(req),fileId=String(b.fileId||'');
+          if(!/^[A-Za-z0-9_-]{10,180}$/.test(fileId))throw new HttpError(400,'Invalid Google Drive file.');
+          const rows=await store.rest('forma_google_connections',`user_id=${eq(user.id)}&role=eq.instructor&select=refresh_cipher&limit=1`);
+          if(!rows.length)throw new HttpError(409,'Connect Google Drive first.');
+          const tokens=await googleToken({client_id:process.env.GOOGLE_CLIENT_ID,client_secret:process.env.GOOGLE_CLIENT_SECRET,refresh_token:decryptGoogle(rows[0].refresh_cipher),grant_type:'refresh_token'});
+          const response=await fetcher('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?fields=id,name,mimeType,webViewLink',{headers:{Authorization:'Bearer '+tokens.access_token},signal:AbortSignal.timeout(12000)});
+          if(!response.ok)throw new HttpError(403,'Google Drive does not allow access to this selected file.');
+          const file=await response.json();
+          if(!String(file.mimeType||'').startsWith('video/'))throw new HttpError(400,'Select a video file.');
+          return json(res,200,{file:{id:file.id,name:file.name,mimeType:file.mimeType},notice:'File selected and validated. Student access and playback are not enabled yet.'});
+        }
         // Private PDF attachments: each file belongs to a course and an authenticated instructor.
         if(p==='/api/course-pdf'&&method==='POST'){
           const user=await auth(req);await rate(req,'pdf:'+user.id,20);
