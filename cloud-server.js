@@ -106,6 +106,29 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
       const url=new URL(req.url,'http://localhost');const p=url.pathname;const method=req.method;
       if(!['GET','HEAD','POST','PUT','DELETE'].includes(method))throw new HttpError(405,'Method not allowed.');
       if(p==='/healthz'){await store.rest('forma_users','select=id&limit=0');return json(res,200,{status:'ok',mode:'portfolio-beta',payments:false});}
+      // Test-only Stripe endpoint: verify the raw body before parsing JSON.
+      if(p==='/api/stripe-test/webhook'&&method==='POST'){
+        const secret=process.env.STRIPE_TEST_WEBHOOK_SECRET||'',key=process.env.STRIPE_TEST_SECRET_KEY||'';
+        if(!/^sk_test_/.test(key)||!/^whsec_/.test(secret))throw new HttpError(503,'Stripe test mode is not configured.');
+        const header=String(req.headers['stripe-signature']||'');
+        const timestamp=header.match(/(?:^|,)t=(\d+)/)?.[1];
+        const signatures=[...header.matchAll(/(?:^|,)v1=([a-f0-9]{64})/g)].map(x=>x[1]);
+        if(!timestamp||!signatures.length||Math.abs(Date.now()/1000-Number(timestamp))>300)throw new HttpError(400,'Invalid webhook signature.');
+        const chunks=[];let bytes=0;for await(const chunk of req){bytes+=chunk.length;if(bytes>2000000)throw new HttpError(413,'Webhook too large.');chunks.push(chunk);}
+        const raw=Buffer.concat(chunks);
+        const expected=crypto.createHmac('sha256',secret).update(timestamp+'.').update(raw).digest('hex');
+        if(!signatures.some(sig=>crypto.timingSafeEqual(Buffer.from(sig,'hex'),Buffer.from(expected,'hex'))))throw new HttpError(400,'Invalid webhook signature.');
+        const event=JSON.parse(raw.toString());
+        if(!['checkout.session.completed','checkout.session.async_payment_succeeded'].includes(event.type))return json(res,200,{received:true});
+        const session=event.data?.object;
+        if(!session||session.livemode!==false||session.payment_status!=='paid'||typeof session.id!=='string')return json(res,200,{received:true});
+        const orders=await store.rest('forma_test_orders','checkout_session_id='+eq(session.id)+'&status=eq.pending&select=id,course_id,student_id,amount_cents,currency&limit=1');
+        if(!orders.length)return json(res,200,{received:true});
+        const order=orders[0];
+        if(Number(session.amount_total)!==Number(order.amount_cents)||session.currency!==order.currency||session.metadata?.order_id!==order.id)throw new HttpError(400,'Payment amount or order mismatch.');
+        await store.rest('forma_test_orders','id='+eq(order.id)+'&status=eq.pending','PATCH',{status:'paid',paid_at:Date.now()});
+        return json(res,200,{received:true,notice:'Payment recorded; course access requires instructor approval.'});
+      }
       // OAuth callback is GET and requires an existing application session.
       if(p==='/api/google/callback'&&method==='GET'){
         const user=await auth(req);if(!oauthReady())throw new HttpError(503,'Google connection is not configured.');
@@ -133,6 +156,26 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
           if(req.headers.origin&&req.headers.origin!==expected)throw new HttpError(403,'Invalid request origin.');
           if(req.headers['sec-fetch-site']==='cross-site')throw new HttpError(403,'Cross-site requests are blocked.');
           if(!String(req.headers['content-type']||'').startsWith('application/json'))throw new HttpError(415,'Send JSON.');
+        }
+        if(p==='/api/stripe-test/checkout'&&method==='POST'){
+          const key=process.env.STRIPE_TEST_SECRET_KEY||'';
+          if(!/^sk_test_/.test(key))throw new HttpError(503,'Stripe TEST secret key is not configured. Live payments are disabled.');
+          const user=await auth(req),b=await read(req),courseId=String(b.courseId||'');
+          if(!/^[a-f0-9]{48}$/.test(courseId))throw new HttpError(400,'Invalid course.');
+          const courses=await store.rest('forma_course_drafts','id='+eq(courseId)+'&select=id,user_id,title,published,outline&limit=1');
+          const course=courses[0];
+          if(!course||!course.published||course.outline?.archived||course.user_id===user.id)throw new HttpError(404,'Course not available for purchase.');
+          const prices=await store.rest('forma_course_prices','course_id='+eq(courseId)+'&enabled=eq.true&select=amount_cents,currency&limit=1');
+          if(!prices.length)throw new HttpError(409,'Course purchases are not enabled.');
+          const price=prices[0],orderId=id(),base=googleOrigin();
+          if(!/^https:\/\//.test(base))throw new HttpError(503,'Site origin not configured.');
+          const form=new URLSearchParams({mode:'payment',success_url:base+'/course/'+courseId+'?checkout=test-success',cancel_url:base+'/course/'+courseId+'?checkout=cancelled',customer_email:user.email,'line_items[0][price_data][currency]':price.currency,'line_items[0][price_data][unit_amount]':String(price.amount_cents),'line_items[0][price_data][product_data][name]':clean(course.title,140),'line_items[0][quantity]':'1','metadata[order_id]':orderId});
+          const response=await fetcher('https://api.stripe.com/v1/checkout/sessions',{method:'POST',headers:{Authorization:'Bearer '+key,'Content-Type':'application/x-www-form-urlencoded','Idempotency-Key':'forma-test-'+orderId},body:form,signal:AbortSignal.timeout(20000)});
+          if(!response.ok)throw new HttpError(502,'Stripe test Checkout could not be created.');
+          const session=await response.json();
+          if(session.livemode!==false||!/^cs_test_/.test(session.id||'')||!/^https:\/\//.test(session.url||''))throw new HttpError(502,'Stripe did not return a test Checkout session.');
+          await store.rest('forma_test_orders','','POST',{id:orderId,course_id:courseId,student_id:user.id,amount_cents:price.amount_cents,currency:price.currency,checkout_session_id:session.id,status:'pending',created:Date.now()});
+          return json(res,201,{url:session.url,mode:'test'});
         }
         if(p==='/api/me'&&method==='GET'){const user=await current(req);return json(res,200,user?{user,profile:await profile(user.id)}:{user:null});}
         if(p==='/api/register'&&method==='POST'){
