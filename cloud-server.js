@@ -194,7 +194,16 @@ function createApp(store,{origin='',production=false,trustProxy=false}={}){
           }
           const prompt='You are creating an editable educational course. Return ONLY JSON of shape {"chapters":[{"title":"...","lessons":[{"title":"...","type":"text","content":"..."},{"title":"...","type":"quiz","content":"Questions with answers"}]}]}. Create 2-5 concise chapters grounded only in supplied material. Never include markdown fences. Topic: '+topic+'\\nNotes: '+source;
           const response=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':apiKey},body:JSON.stringify({contents:[{parts:[{text:prompt},...(pdfPart?[pdfPart]:[])]}],generationConfig:{responseMimeType:'application/json'}}),signal:AbortSignal.timeout(45000)});
-          if(!response.ok)throw new HttpError(502,'Gemini request failed. Check API access and quota.');
+          if(!response.ok){
+            const errorBody=await response.json().catch(()=>({}));
+            const providerCode=String(errorBody.error?.status||'');
+            console.error('Gemini upstream status:',response.status,providerCode);
+            if(response.status===429)throw new HttpError(429,'Gemini rate limit or quota reached. Check Google AI Studio usage and billing.');
+            if(response.status===400)throw new HttpError(502,'Gemini rejected the request. The PDF or model input may be unsupported.');
+            if(response.status===401||response.status===403)throw new HttpError(502,'Gemini API key is invalid, restricted, or lacks permission.');
+            if(response.status===404)throw new HttpError(502,'Gemini model is not available for this API key.');
+            throw new HttpError(502,'Gemini temporarily failed (HTTP '+response.status+').');
+          }
           const data=await response.json();const raw=data.candidates?.[0]?.content?.parts?.map(x=>x.text||'').join('')||'';
           let outline;try{outline=JSON.parse(raw);}catch{throw new HttpError(502,'Gemini returned an invalid outline.');}
           if(!outline||!Array.isArray(outline.chapters)||outline.chapters.length>20)throw new HttpError(502,'Gemini returned an invalid outline.');
@@ -217,7 +226,7 @@ function createApp(store,{origin='',production=false,trustProxy=false}={}){
 if(require.main===module){
   const store=createStore(process.env.SUPABASE_URL,process.env.SUPABASE_SERVICE_ROLE_KEY);
   const app=createApp(store,{origin:process.env.APP_ORIGIN||'',production:process.env.NODE_ENV==='production',trustProxy:!!process.env.RENDER});
-  const server=http.createServer(app);server.requestTimeout=30000;server.headersTimeout=10000;
+  const server=http.createServer(app);server.requestTimeout=90000;server.headersTimeout=10000;
   server.listen(Number(process.env.PORT||3000),'0.0.0.0',()=>console.log('Forma portfolio beta listening'));
   process.on('SIGTERM',()=>server.close(()=>process.exit(0)));
 }
