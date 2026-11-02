@@ -101,3 +101,22 @@ test('course deletion moves to owner-only Trash, revokes publication, and restor
  assert.equal((await req(route+'/restore',{},true,'POST')).status,404);
  assert.equal((await req('/api/course-drafts?archived=true',undefined,true,'GET')).body.courses.length,0);
 });
+
+test('Drive lesson attachments validate and never appear in public course responses',async t=>{
+ const {tables,req}=await setup(t);
+ const file={id:'videoFile_123456789',name:'Lecture.mp4',mimeType:'video/mp4'};
+ const outline=valid();outline.chapters[0].lessons[0].driveFile=file;
+ assert.deepEqual(validateOutline(outline),outline);
+ for(const invalid of [{id:'bad',name:'Lecture.mp4',mimeType:'video/mp4'},{id:file.id,name:'',mimeType:'video/mp4'},{id:file.id,name:'Lecture.mp4',mimeType:'text/plain'}]){
+   const bad=valid();bad.chapters[0].lessons[0].driveFile=invalid;
+   assert.throws(()=>validateOutline(bad));
+ }
+ assert.throws(()=>validateOutline(outline,{generated:true}));
+ tables.forma_course_drafts[0].outline=outline;
+ tables.forma_course_drafts[0].published=true;
+ const publicView=await req('/api/course-view/'+cid,undefined,false,'GET');
+ assert.equal(publicView.status,200);
+ assert.equal(publicView.body.course.outline.chapters[0].lessons[0].driveFile,undefined);
+ const ownerView=await req('/api/course-drafts/'+cid,undefined,true,'GET');
+ assert.deepEqual(ownerView.body.course.outline.chapters[0].lessons[0].driveFile,file);
+});
