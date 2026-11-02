@@ -202,6 +202,24 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
           const outline={chapters:course.outline.chapters.map(c=>({title:c.title,lessons:c.lessons.map(l=>({title:l.title,type:l.type,content:l.content,...(owner&&l.pdfId?{pdfId:l.pdfId,pdfName:l.pdfName}:{})}))}))};
           return json(res,200,{course:{id:course.id,title:course.title,published:course.published,outline},owner});
         }
+        // Server-only diagnostic. Never expose the configured Gemini API key.
+        if(p==='/api/gemini-models'&&method==='GET'){
+          await auth(req);
+          if(!geminiKey)throw new HttpError(503,'Gemini API key is not configured.');
+          let upstream;
+          try{upstream=await fetcher('https://generativelanguage.googleapis.com/v1beta/models?pageSize=100',{
+            headers:{'x-goog-api-key':geminiKey},signal:AbortSignal.timeout(15000)
+          });}catch{throw new HttpError(502,'Could not contact Gemini models API.');}
+          if(!upstream.ok){
+            if(upstream.status===429)throw new HttpError(429,'Gemini model listing is rate limited.');
+            throw new HttpError(502,'Gemini model listing failed (HTTP '+upstream.status+').');
+          }
+          const data=await upstream.json().catch(()=>({}));
+          const available=(Array.isArray(data.models)?data.models:[])
+            .filter(m=>Array.isArray(m.supportedGenerationMethods)&&m.supportedGenerationMethods.includes('generateContent'))
+            .map(m=>m.name).filter(n=>/^models\/gemini-[a-z0-9.-]+$/.test(n));
+          return json(res,200,{configuredModel:geminiModel,availableModels:available,note:'This lists models; generation may still be subject to quotas.'});
+        }
         if(p==='/api/course-generate'&&method==='POST'){
           const user=await auth(req);
           const b=await read(req);const source=clean(b.source,16000),topic=clean(b.topic,180);
