@@ -15,9 +15,9 @@ async function enrollments(){
   for(const student of d.enrollments){
    const row=element('p',student.email+' — '+student.status+' ');
    for(const decision of ['approve','revoke']){
-    if(decision==='approve'&&student.status==='approved')continue;
+    
     if(decision==='revoke'&&student.status==='revoked')continue;
-    row.append(element('button',decision==='approve'?'Approve':'Revoke',async()=>{
+    row.append(element('button',decision==='approve'?(student.status==='approved'?'Sync Drive access':'Approve'):'Revoke',async()=>{
      try{
       if(!window.confirm((decision==='approve'?'Grant':'Revoke')+' Drive access for '+student.email+'?'))return;
       await api('/api/course-enrollments/'+courseId+'/decision',{method:'POST',body:JSON.stringify({email:student.email,decision})});
