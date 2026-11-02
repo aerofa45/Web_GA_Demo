@@ -176,6 +176,21 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
           if(req.headers['sec-fetch-site']==='cross-site')throw new HttpError(403,'Cross-site requests are blocked.');
           if(!String(req.headers['content-type']||'').startsWith('application/json'))throw new HttpError(415,'Send JSON.');
         }
+        const pricingRoute=p.match(/^\/api\/stripe-test\/subscription-price\/([a-f0-9]{48})$/);
+        if(pricingRoute&&['GET','POST'].includes(method)){
+          const user=await auth(req),courseId=pricingRoute[1];
+          const course=await store.rest('forma_course_drafts','id='+eq(courseId)+'&user_id='+eq(user.id)+'&select=id,outline&limit=1');
+          if(!course.length||course[0].outline?.archived)throw new HttpError(404,'Course not found.');
+          const query='course_id='+eq(courseId);
+          const current=await store.rest('forma_course_subscription_prices',query+'&select=amount_cents,currency,interval,enabled&limit=1');
+          if(method==='GET')return json(res,200,{price:current[0]||null,testOnly:true});
+          const b=await read(req),amount=Number(b.amountCents),interval=b.interval,enabled=b.enabled===true;
+          if(!Number.isSafeInteger(amount)||amount<100||amount>10000000||!['month','year'].includes(interval)||typeof b.enabled!=='boolean')throw new HttpError(400,'Use valid test amount, interval and enabled status.');
+          const record={course_id:courseId,amount_cents:amount,currency:'usd',interval,enabled,updated:Date.now()};
+          if(current.length)await store.rest('forma_course_subscription_prices',query,'PATCH',record);
+          else await store.rest('forma_course_subscription_prices','','POST',record);
+          return json(res,200,{price:record,testOnly:true});
+        }
         if(p==='/api/stripe-test/subscription-checkout'&&method==='POST'){
           const key=process.env.STRIPE_TEST_SECRET_KEY||'';
           if(!/^(sk_test_|rk_test_)/.test(key))throw new HttpError(503,'Stripe test mode is not configured.');
