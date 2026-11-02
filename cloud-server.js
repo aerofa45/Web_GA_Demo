@@ -51,7 +51,7 @@ function createApp(store,{origin='',production=false,trustProxy=false}={}){
   async function rate(req,action,max,window=3600000){
     const ip=trustProxy?String(req.headers['x-forwarded-for']||req.socket.remoteAddress).split(',')[0].trim():req.socket.remoteAddress;
     const key=crypto.createHmac('sha256',store.key).update(action+':'+ip).digest('hex');
-    if(!await store.rpc('forma_limit',{p_key:key,p_now:Date.now(),p_window:window,p_max:max}))throw new HttpError(429,'Too many requests. Please try again later.');
+    if(!await store.rpc('forma_limit',{p_key:key,p_now:Date.now(),p_window:window,p_max:max}))throw new HttpError(429,action.startsWith('gemini:')?'Forma Studio generation test limit reached for this network. Try again after the hourly window.':'Too many requests. Please try again later.');
   }
   async function userBySlug(slug){const users=await store.rest('forma_users',`slug=${eq(slug)}&select=id,name,slug&limit=1`);if(!users.length)throw new HttpError(404,'Portfolio not found.');return users[0];}
   const demo=sanitize({...initial('Jordan Ellis','demo'),headline:'Design engineer · Creative technologist',location:'Fictional example',bio:'This read-only example shows how a portfolio can present research, projects, and experience. Create an account to build your own.',featuredText:'Thoughtful ideas. Useful digital experiences.',heroImage:'https://images.unsplash.com/photo-1519608487953-e999c86e7455?auto=format&fit=crop&w=1800&q=80'},{name:'Jordan Ellis'});
@@ -178,9 +178,10 @@ function createApp(store,{origin='',production=false,trustProxy=false}={}){
           return json(res,200,{ok:true});
         }
         if(p==='/api/course-generate'&&method==='POST'){
-          const user=await auth(req);await rate(req,'gemini:'+user.id,8,3600000);
+          const user=await auth(req);
           const b=await read(req);const source=clean(b.source,16000),topic=clean(b.topic,180);
           if(source.length<80&&!b.pdfId)throw new HttpError(400,'Paste at least 80 characters of notes or choose an attached PDF.');
+          await rate(req,'gemini:'+user.id,20,3600000);
           const apiKey=process.env.GEMINI_API_KEY;if(!apiKey)throw new HttpError(503,'Gemini is not configured.');
           let pdfPart=null;
           if(b.pdfId){
