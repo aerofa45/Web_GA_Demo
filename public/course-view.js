@@ -24,11 +24,12 @@
  if(l.hasDriveVideo){
   const privateLink=text('button','Open private Drive video');privateLink.type='button';
   privateLink.addEventListener('click',async()=>{
+   const tab=window.open('about:blank','_blank');
    try{
     const r=await fetch('/api/course-video/'+id+'/'+data.course.outline.chapters.indexOf(c)+'/'+c.lessons.indexOf(l),{credentials:'same-origin'});
     const result=await r.json();if(!r.ok)throw Error(result.error||'Video unavailable');
-    window.open(result.url,'_blank','noopener,noreferrer');
-   }catch(e){const m=text('p',e.message);article.append(m);}
+    if(tab){tab.opener=null;tab.location.replace(result.url);}else{const link=text('a','Open Google Drive video');link.href=result.url;link.target='_blank';link.rel='noopener noreferrer';article.append(link);}
+   }catch(e){if(tab)tab.close();const m=text('p',e.message);article.append(m);}
   });article.append(privateLink);
  }
  if(data.owner&&l.pdfId){const link=text('a','View instructor PDF');link.href='/api/course-pdf/'+l.pdfId;link.target='_blank';link.rel='noopener';article.append(link);}section.append(article);}root.append(section);}
