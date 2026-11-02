@@ -74,7 +74,7 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
     res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','strict-origin-when-cross-origin');
     res.setHeader('X-Frame-Options','DENY');
     res.setHeader('Permissions-Policy','camera=(), microphone=(), geolocation=()');
-    res.setHeader('Content-Security-Policy',"default-src 'self'; img-src 'self' https:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; media-src 'self' https:; frame-src https://www.youtube-nocookie.com; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'");
+    res.setHeader('Content-Security-Policy',"default-src 'self'; img-src 'self' https:; style-src 'self' 'unsafe-inline'; script-src 'self' https://apis.google.com https://www.gstatic.com; connect-src 'self' https://www.googleapis.com https://accounts.google.com https://apis.google.com; media-src 'self' https:; frame-src https://www.youtube-nocookie.com https://docs.google.com https://drive.google.com https://accounts.google.com; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'");
     if(production)res.setHeader('Strict-Transport-Security','max-age=31536000');
     try{
       const url=new URL(req.url,'http://localhost');const p=url.pathname;const method=req.method;
