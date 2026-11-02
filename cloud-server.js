@@ -282,6 +282,93 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
           await store.rest('forma_course_drafts','id='+eq(courseId)+'&user_id='+eq(user.id),'PATCH',{outline,published:false,updated:Date.now()});
           return json(res,200,{ok:true});
         }
+
+        // Private Drive lessons: instructor approval and provider permission tracked together.
+        const enrollMatch=p.match(/^\/api\/course-enrollments\/([a-f0-9]{48})(?:\/(request|decision))?$/);
+        if(enrollMatch){
+          const user=await auth(req),courseId=enrollMatch[1],action=enrollMatch[2];
+          const found=await store.rest('forma_course_drafts','id='+eq(courseId)+'&select=id,user_id,published,outline&limit=1');
+          const course=found[0];
+          if(!course||course.outline?.archived)throw new HttpError(404,'Course not found.');
+          const owner=course.user_id===user.id;
+          if(method==='GET'&&!action){
+            if(owner){
+              const enrollments=await store.rest('forma_course_enrollments','course_id='+eq(courseId)+'&select=email,status,created,updated&order=created.desc');
+              return json(res,200,{enrollments});
+            }
+            const own=await store.rest('forma_course_enrollments','course_id='+eq(courseId)+'&email='+eq(user.email.toLowerCase())+'&select=status&limit=1');
+            return json(res,200,{status:own[0]?.status||'none'});
+          }
+          if(method==='POST'&&action==='request'){
+            if(owner||!course.published)throw new HttpError(403,'This course is not accepting requests.');
+            const email=user.email.toLowerCase();
+            const existing=await store.rest('forma_course_enrollments','course_id='+eq(courseId)+'&email='+eq(email)+'&select=status&limit=1');
+            if(existing[0]?.status==='approved')return json(res,200,{status:'approved'});
+            if(existing[0]?.status==='revoked')throw new HttpError(403,'Access was revoked. Contact the instructor.');
+            if(!existing.length)await store.rest('forma_course_enrollments','','POST',{course_id:courseId,email,status:'pending',created:Date.now(),updated:Date.now()});
+            return json(res,200,{status:'pending'});
+          }
+          if(method==='POST'&&action==='decision'){
+            if(!owner)throw new HttpError(403,'Only the instructor can manage enrollment.');
+            const b=await read(req),email=String(b.email||'').trim().toLowerCase(),decision=b.decision;
+            if(!/^\S+@\S+\.\S+$/.test(email)||!['approve','revoke'].includes(decision))throw new HttpError(400,'Invalid enrollment decision.');
+            const enrolled=await store.rest('forma_course_enrollments','course_id='+eq(courseId)+'&email='+eq(email)+'&select=status&limit=1');
+            if(!enrolled.length)throw new HttpError(404,'No enrollment request for this email.');
+            const connection=await store.rest('forma_google_connections','user_id='+eq(user.id)+'&role=eq.instructor&select=refresh_cipher&limit=1');
+            const files=[...new Set(course.outline.chapters.flatMap(ch=>ch.lessons.map(l=>l.driveFile?.id).filter(Boolean)))];
+            const prior=await store.rest('forma_drive_video_grants','course_id='+eq(courseId)+'&email='+eq(email)+'&select=file_id,permission_id');
+            if(files.length||prior.length){
+              if(!connection.length)throw new HttpError(409,'Connect the instructor Google Drive account first.');
+              const tokenData=await googleToken({client_id:process.env.GOOGLE_CLIENT_ID,client_secret:process.env.GOOGLE_CLIENT_SECRET,refresh_token:decryptGoogle(connection[0].refresh_cipher),grant_type:'refresh_token'});
+              const accessToken=tokenData.access_token;
+              if(!accessToken)throw new HttpError(502,'Google Drive token refresh failed.');
+              const google=async(fileId,permissionId,verb)=>{
+                const endpoint='https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'/permissions'+(permissionId?'/'+encodeURIComponent(permissionId):'')+(verb==='POST'?'?sendNotificationEmail=false':'');
+                const result=await fetcher(endpoint,{method:verb,headers:{Authorization:'Bearer '+accessToken,...(verb==='POST'?{'Content-Type':'application/json'}:{})},...(verb==='POST'?{body:JSON.stringify({type:'user',role:'reader',emailAddress:email})}:{}),signal:AbortSignal.timeout(15000)});
+                if(!result.ok&&!(verb==='DELETE'&&result.status===404))throw new HttpError(502,'Google Drive permission '+(verb==='POST'?'grant':'removal')+' failed (HTTP '+result.status+').');
+                return verb==='POST'?result.json():null;
+              };
+              if(decision==='approve'){
+                // Never trust an email entered by the instructor alone: it must come from a registered request.
+                for(const fileId of files){
+                  if(prior.some(g=>g.file_id===fileId))continue;
+                  const grant=await google(fileId,null,'POST');
+                  if(!grant.id)throw new HttpError(502,'Google did not return a permission ID.');
+                  await store.rest('forma_drive_video_grants','','POST',{course_id:courseId,email,file_id:fileId,permission_id:grant.id,created:Date.now()});
+                }
+              }else{
+                // Revoke app entitlement first, then remove any provider grants. Errors stay visible for retry.
+                await store.rest('forma_course_enrollments','course_id='+eq(courseId)+'&email='+eq(email),'PATCH',{status:'revoked',updated:Date.now()});
+                for(const grant of prior){
+                  await google(grant.file_id,grant.permission_id,'DELETE');
+                  await store.rest('forma_drive_video_grants','course_id='+eq(courseId)+'&email='+eq(email)+'&file_id='+eq(grant.file_id),'DELETE');
+                }
+                return json(res,200,{status:'revoked'});
+              }
+            }
+            const status=decision==='approve'?'approved':'revoked';
+            await store.rest('forma_course_enrollments','course_id='+eq(courseId)+'&email='+eq(email),'PATCH',{status,updated:Date.now()});
+            return json(res,200,{status});
+          }
+          throw new HttpError(405,'Method not allowed.');
+        }
+        const videoMatch=p.match(/^\/api\/course-video\/([a-f0-9]{48})\/(\d+)\/(\d+)$/);
+        if(videoMatch&&method==='GET'){
+          const user=await auth(req),courseId=videoMatch[1],i=Number(videoMatch[2]),j=Number(videoMatch[3]);
+          const rows=await store.rest('forma_course_drafts','id='+eq(courseId)+'&select=user_id,published,outline&limit=1');
+          const course=rows[0];
+          if(!course||course.outline?.archived)throw new HttpError(404,'Course not found.');
+          const file=course.outline.chapters[i]?.lessons[j]?.driveFile;
+          if(!file)throw new HttpError(404,'Private video not found.');
+          const owner=course.user_id===user.id;
+          if(!owner){
+            if(!course.published)throw new HttpError(403,'Course is not available.');
+            const approved=await store.rest('forma_course_enrollments','course_id='+eq(courseId)+'&email='+eq(user.email.toLowerCase())+'&status=eq.approved&select=email&limit=1');
+            const grant=await store.rest('forma_drive_video_grants','course_id='+eq(courseId)+'&email='+eq(user.email.toLowerCase())+'&file_id='+eq(file.id)+'&select=permission_id&limit=1');
+            if(!approved.length||!grant.length)throw new HttpError(403,'Instructor approval is required for this video.');
+          }
+          return json(res,200,{url:'https://drive.google.com/file/d/'+encodeURIComponent(file.id)+'/view',notice:'Google Drive controls playback and requires access with your approved Google account.'});
+        }
         const viewMatch=p.match(/^\/api\/course-view\/([a-f0-9]{48})$/);
         if(viewMatch&&method==='GET'){
           const viewer=await current(req);
