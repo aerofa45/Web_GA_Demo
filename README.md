@@ -1,5 +1,9 @@
 # Forma Studio — portfolio builder beta
 
+Live beta: https://forma-studio-69of.onrender.com
+
+Hosted using the dedicated Forma_Trial Supabase project. Nine automated backend tests and the initial live API checks passed. A production security audit and full manual accessibility review have not been performed.
+
 Forma lets students, researchers, and creators publish a personal portfolio and maintain it without editing code. It supports account registration, sign-in, live editing, custom pages, public portfolios, optimized image uploads, and a private contact inbox.
 
 This application lives on **forma-studio** in aerofa45/Web_GA_Demo. The SEMO Campus Web Studio remains on **main**. Keep their hosting separate; do not merge these application roots.
@@ -43,3 +47,9 @@ Before inviting testers, verify against the actual Supabase project: signup/logi
 The SQL schema is repeatable and does not replace existing tables. Treat future schema changes as migrations: export data first, test in a separate project, apply compatible changes, then deploy. Do not import the database files from the original ZIP. For rollback, deploy an earlier compatible Forma commit; never point Render at main.
 
 Expired sessions and rate-limit rows should be pruned periodically by an administrator. For a removal request, verify ownership, remove the user's objects through Supabase Storage, then remove the corresponding forma_users row; dependent rows cascade. Do not delete another user's data.
+
+## Updating this deployment
+
+The current Render service uses the public-repository connection. Push reviewed changes to forma-studio, then choose Manual Deploy > Deploy latest commit in Render. Automatic deploys are not configured by this connection. Never deploy main to the Forma service.
+
+Hosted API checks are opt-in: set FORMA_TEST_URL and run `node tests/live-check.mjs`. This creates two fictional QA accounts and an image; it does not delete existing data or store passwords in its report.
