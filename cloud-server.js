@@ -1,6 +1,7 @@
 'use strict';
 const http = require('node:http');
 const {validateOutline}=require('./course');
+const {applyGeneration}=require('./public/course-tools');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
@@ -61,7 +62,7 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
     res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','strict-origin-when-cross-origin');
     res.setHeader('X-Frame-Options','DENY');
     res.setHeader('Permissions-Policy','camera=(), microphone=(), geolocation=()');
-    res.setHeader('Content-Security-Policy',"default-src 'self'; img-src 'self' https:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; media-src 'self' https:; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'");
+    res.setHeader('Content-Security-Policy',"default-src 'self'; img-src 'self' https:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; media-src 'self' https:; frame-src https://www.youtube-nocookie.com; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'");
     if(production)res.setHeader('Strict-Transport-Security','max-age=31536000');
     try{
       const url=new URL(req.url,'http://localhost');const p=url.pathname;const method=req.method;
@@ -127,7 +128,7 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
           const user=await auth(req);await rate(req,'pdf:'+user.id,20);
           const b=await read(req),courseId=String(b.courseId||''),raw=String(b.data||'');
           if(!/^[a-f0-9]{48}$/.test(courseId))throw new HttpError(400,'Select a course first.');
-          const owned=await store.rest('forma_course_drafts',`id=${eq(courseId)}&user_id=${eq(user.id)}&select=id&limit=1`);
+          const owned=await store.rest('forma_course_drafts',`id=${eq(courseId)}&user_id=${eq(user.id)}&select=id,published&limit=1`);
           if(!owned.length)throw new HttpError(404,'Course not found.');
           if(!/^data:application\/pdf;base64,[A-Za-z0-9+/]+={0,2}$/.test(raw))throw new HttpError(400,'Upload a PDF file.');
           const bytes=Buffer.from(raw.split(',')[1],'base64');
@@ -166,21 +167,39 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
         }
         if(courseMatch&&method==='PUT'){
           const user=await auth(req);await rate(req,'course-edit:'+user.id,120);
-          const rows=await store.rest('forma_course_drafts',`id=${eq(courseMatch[1])}&user_id=${eq(user.id)}&select=id&limit=1`);
+          const rows=await store.rest('forma_course_drafts',`id=${eq(courseMatch[1])}&user_id=${eq(user.id)}&select=id,published&limit=1`);
           if(!rows.length)throw new HttpError(404,'Course not found.');
           const b=await read(req),title=clean(b.title,140),outline=b.outline;
           if(!title)throw new HttpError(400,'Course title is required.');
           try{validateOutline(outline);}catch{throw new HttpError(400,'Invalid course outline.');}
+          if(b.published!==undefined&&typeof b.published!=='boolean')throw new HttpError(400,'Invalid publication status.');
+          if((b.published??rows[0].published)&&(!outline.chapters.length||outline.chapters.some(c=>!c.lessons.length||c.lessons.some(l=>!l.content.trim()))))throw new HttpError(400,'Add content to every chapter and lesson before publishing.');
           for(const pdfId of new Set(outline.chapters.flatMap(ch=>ch.lessons.map(l=>l.pdfId).filter(Boolean)))){
             const files=await store.rest('forma_course_files','id='+eq(pdfId)+'&user_id='+eq(user.id)+'&course_id='+eq(courseMatch[1])+'&select=id&limit=1');
             if(!files.length)throw new HttpError(400,'An attached PDF does not belong to this course.');
           }
-          await store.rest('forma_course_drafts',`id=${eq(courseMatch[1])}&user_id=${eq(user.id)}`,'PATCH',{title,outline,updated:Date.now()});
+          await store.rest('forma_course_drafts',`id=${eq(courseMatch[1])}&user_id=${eq(user.id)}`,'PATCH',{title,outline,...(b.published===undefined?{}:{published:b.published}),updated:Date.now()});
           return json(res,200,{ok:true});
+        }
+        const viewMatch=p.match(/^\/api\/course-view\/([a-f0-9]{48})$/);
+        if(viewMatch&&method==='GET'){
+          const viewer=await current(req);
+          const rows=await store.rest('forma_course_drafts','id='+eq(viewMatch[1])+'&select=id,user_id,title,outline,published&limit=1');
+          const course=rows[0];
+          if(!course||(!course.published&&course.user_id!==viewer?.id))throw new HttpError(404,'Course not found.');
+          const owner=course.user_id===viewer?.id;
+          const outline={chapters:course.outline.chapters.map(c=>({title:c.title,lessons:c.lessons.map(l=>({title:l.title,type:l.type,content:l.content,...(owner&&l.pdfId?{pdfId:l.pdfId,pdfName:l.pdfName}:{})}))}))};
+          return json(res,200,{course:{id:course.id,title:course.title,published:course.published,outline},owner});
         }
         if(p==='/api/course-generate'&&method==='POST'){
           const user=await auth(req);
           const b=await read(req);const source=clean(b.source,16000),topic=clean(b.topic,180);
+          const scope=b.scope||'course';
+          if(!['course','chapter','lesson'].includes(scope))throw new HttpError(400,'Invalid generation scope.');
+          if(scope!=='course'){
+            try{validateOutline({chapters:[b.target]});}catch{throw new HttpError(400,'Invalid generation target.');}
+            if(!b.target.lessons.length||b.target.lessons.some(l=>l.type==='youtube')||(scope==='lesson'&&b.target.lessons.length!==1))throw new HttpError(400,'Choose text or quiz lessons to regenerate.');
+          }
           if(source.length<80&&!b.pdfId)throw new HttpError(400,'Paste at least 80 characters of notes or choose an attached PDF.');
           if(!/^gemini-[a-z0-9.-]+$/.test(geminiModel))throw new HttpError(503,'Gemini model configuration is invalid.');
           const apiKey=geminiKey;if(!apiKey)throw new HttpError(503,'Gemini is not configured.');
@@ -197,7 +216,8 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
             pdfPart={inline_data:{mime_type:'application/pdf',data:data.toString('base64')}};
           }
           await rate(req,'gemini:'+user.id,20,3600000);
-          const prompt='You are creating an editable educational course. Return ONLY JSON of shape {"chapters":[{"title":"...","lessons":[{"title":"...","type":"text","content":"..."},{"title":"...","type":"quiz","content":"Questions with answers"}]}]}. Create 2-5 concise chapters grounded only in supplied material. Never include markdown fences. Topic: '+topic+'\\nNotes: '+source;
+          const instruction=scope==='course'?'Create 2-5 concise chapters.':'Return exactly one chapter with exactly '+b.target.lessons.length+' lessons, keeping each lesson type in this order: '+b.target.lessons.map(l=>l.type).join(', ')+'. Regenerate this target: '+JSON.stringify(b.target)+'.';
+          const prompt=instruction+' '+'You are creating an editable educational course. Return ONLY JSON of shape {"chapters":[{"title":"...","lessons":[{"title":"...","type":"text","content":"..."},{"title":"...","type":"quiz","content":"Questions with answers"}]}]}. Ground every explanation only in supplied material. Never include markdown fences. Topic: '+topic+'\\nNotes: '+source;
           let response;
           try{response=await fetcher('https://generativelanguage.googleapis.com/v1beta/models/'+geminiModel+':generateContent',{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':apiKey},body:JSON.stringify({contents:[{parts:[{text:prompt},...(pdfPart?[pdfPart]:[])]}],generationConfig:{responseMimeType:'application/json'}}),signal:AbortSignal.timeout(45000)});
           }catch(e){const timeout=['TimeoutError','AbortError'].includes(e.name);throw new HttpError(timeout?504:502,timeout?'Gemini timed out. Please try again.':'Could not reach Gemini. Please try again.');}
@@ -216,6 +236,9 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
           const raw=data.candidates?.[0]?.content?.parts?.map(x=>x.text||'').join('')||'';
           let outline;try{outline=JSON.parse(raw);}catch{throw new HttpError(502,'Gemini returned an invalid outline.');}
           try{validateOutline(outline,{generated:true});}catch{throw new HttpError(502,'Gemini returned an invalid outline.');}
+          if(scope!=='course'){
+            try{applyGeneration({chapters:[b.target]},outline,{scope:'chapter',chapter:0});}catch{throw new HttpError(502,'Gemini returned a replacement that does not match the selected lessons.');}
+          }
           return json(res,200,{outline});
         }
         if(/^\/api\/(public-courses\/|courses|earnings|withdrawals|admin|payment-connectors|stripe|esewa|course-video|media)/.test(p))throw new HttpError(403,'Payments, private lessons, withdrawals, and video uploads are disabled in this portfolio beta.');
@@ -223,9 +246,9 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
       }
       if(!['GET','HEAD'].includes(method))throw new HttpError(405,'Method not allowed.');
       if(p==='/robots.txt'){res.writeHead(200,{'Content-Type':'text/plain'});return res.end('User-agent: *\nDisallow: /app\nDisallow: /api/\nDisallow: /login\nDisallow: /register\n');}
-      const routes=['/','/app','/login','/register','/privacy','/course-studio'];const isPage=routes.includes(p)||/^\/u\/[a-z0-9-]+$/.test(p);
-      if(!isPage&&!['/app.js','/style.css','/course-studio.js'].includes(p))throw new HttpError(404,'Not found.');
-      let content=await fs.readFile(path.join(ROOT,isPage?(p==='/course-studio'?'course-studio.html':'index.html'):p.slice(1)));const type=isPage?'text/html; charset=utf-8':p.endsWith('.js')?'text/javascript; charset=utf-8':'text/css; charset=utf-8';
+      const routes=['/','/app','/login','/register','/privacy','/course-studio'];const isPage=routes.includes(p)||/^\/course\/[a-f0-9]{48}$/.test(p)||/^\/u\/[a-z0-9-]+$/.test(p);
+      if(!isPage&&!['/app.js','/style.css','/course-studio.js','/course-tools.js','/course-view.js'].includes(p))throw new HttpError(404,'Not found.');
+      let content=await fs.readFile(path.join(ROOT,isPage?(p==='/course-studio'?'course-studio.html':p.startsWith('/course/')?'course-view.html':'index.html'):p.slice(1)));const type=isPage?'text/html; charset=utf-8':p.endsWith('.js')?'text/javascript; charset=utf-8':'text/css; charset=utf-8';
       if(isPage){let title='Forma Studio — Your portfolio, your space',description='Build and publish a personal portfolio with customizable pages and images.';if(p.startsWith('/u/')){const slug=p.slice(3),data=slug==='demo'?demo:await profile((await userBySlug(slug)).id);title=data.name+' | Portfolio';description=clean(data.bio,160);}let base=origin||(production?process.env.RENDER_EXTERNAL_URL:'');content=content.toString().replace('__TITLE__',escape(title)).replaceAll('__DESCRIPTION__',escape(description)).replace('__CANONICAL__',base?`<link rel="canonical" href="${escape(base+p)}">`:'');}
       res.writeHead(200,{'Content-Type':type,'Cache-Control':isPage?'no-cache':'public, max-age=300'});return res.end(method==='HEAD'?undefined:content);
     }catch(e){const status=e.status||500;if(status>=500)console.error('Forma request failed:',e.name);if(!res.headersSent)return json(res,status,{error:status===500?'Something went wrong. Please try again.':e.message});res.end();}

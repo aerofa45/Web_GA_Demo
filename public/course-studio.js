@@ -1,23 +1,51 @@
 'use strict';
-const el=id=>document.getElementById(id);let active=null,outline={chapters:[]};
-const say=(msg)=>{el('message').textContent=msg;const status=el('generate-status');if(status)status.textContent=msg;};
-async function api(url,opts={}){const r=await fetch(url,{credentials:'same-origin',headers:{'Content-Type':'application/json'},...opts});let data=await r.json().catch(()=>({}));if(!r.ok)throw Error(data.error||data.message||'Request failed ('+r.status+')');return data;}
-function element(tag,value,callback){const x=document.createElement(tag);if(value!==undefined)x.textContent=value;if(callback)x.addEventListener('click',callback);return x;}
-async function list(){const d=await api('/api/course-drafts');el('courses').replaceChildren();for(const c of d.courses){const btn=element('button',c.title,()=>load(c.id));el('courses').append(btn);}}
-async function load(id){const d=await api('/api/course-drafts/'+id);active=id;el('material').value='';outline=d.course.outline||{chapters:[]};el('course-title').value=d.course.title;el('editor').hidden=false;render();say('Editing '+d.course.title);}
+const el=id=>document.getElementById(id);
+let active=null,outline={chapters:[]},published=false,generating=false,loading=0;
+const say=msg=>{el('message').textContent=msg;el('generate-status').textContent=msg;};
+async function api(url,opts={}){const r=await fetch(url,{credentials:'same-origin',headers:{'Content-Type':'application/json'},...opts});const data=await r.json().catch(()=>({}));if(!r.ok)throw Error(data.error||'Request failed ('+r.status+')');return data;}
+function element(tag,value,callback){const x=document.createElement(tag);if(value!==undefined)x.textContent=value;if(callback){x.type='button';x.addEventListener('click',callback);}return x;}
+async function list(){const d=await api('/api/course-drafts');el('courses').replaceChildren();for(const c of d.courses)el('courses').append(element('button',c.title+(c.published?' · Published':' · Draft'),()=>load(c.id).catch(e=>say(e.message))));}
+async function load(id){const version=++loading,d=await api('/api/course-drafts/'+id);if(version!==loading)return;active=id;outline=d.course.outline||{chapters:[]};published=d.course.published;el('material').value='';el('course-title').value=d.course.title;el('editor').hidden=false;publication();render();say('Editing '+d.course.title);}
+function publication(){el('publication').textContent=published?'Published publicly':'Private draft';el('publish').textContent=published?'Unpublish course':'Publish publicly';el('preview').href='/course/'+active;}
 function sources(){const select=el('material'),old=select.value;select.replaceChildren();const notes=element('option','Typed notes only');notes.value='';select.append(notes);outline.chapters.forEach((c,i)=>c.lessons.forEach((l,j)=>{const o=element('option',c.title+' / '+l.title+(l.pdfId?' (PDF)':' (text)'));o.value=i+':'+j;select.append(o);}));select.value=old;if(select.selectedIndex<0)select.value='';}
-function render(){sources();const root=el('chapters');root.replaceChildren();outline.chapters.forEach((c,i)=>{const s=element('section');const title=document.createElement('input');title.value=c.title||'';title.placeholder='Chapter title';title.addEventListener('input',()=>c.title=title.value);s.append(title);(c.lessons||[]).forEach((l,j)=>{const wrap=element('div');wrap.className='lesson';const name=document.createElement('input');name.placeholder='Lesson title';name.value=l.title||'';name.addEventListener('input',()=>l.title=name.value);const type=document.createElement('select');for(const t of ['text','youtube','quiz']){const o=document.createElement('option');o.value=t;o.textContent=t;type.append(o);}type.value=l.type;type.addEventListener('change',()=>l.type=type.value);const body=document.createElement('textarea');body.rows=5;body.placeholder='Lesson text, YouTube watch URL, or quiz questions and answers';body.value=l.content||'';body.addEventListener('input',()=>l.content=body.value);const upload=document.createElement('input');upload.type='file';upload.accept='application/pdf,.pdf';upload.setAttribute('aria-label','Attach PDF to this lesson');upload.addEventListener('change',async()=>{try{if(!active)throw Error('Select a course first.');const file=upload.files[0];if(!file)return;if(file.size>1800000)throw Error('PDF must be under 1.8 MB.');const data=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(Error('Could not read PDF'));reader.readAsDataURL(file);});const d=await api('/api/course-pdf',{method:'POST',body:JSON.stringify({courseId:active,name:file.name,data})});l.pdfId=d.file.id;l.pdfName=d.file.name;say('PDF uploaded. Click Save course to attach it to this lesson.');render();}catch(e){say(e.message);}});const pdf=element('p',l.pdfId?'Attached PDF: '+(l.pdfName||'PDF'):'Attach a PDF to this lesson (optional)');const open=l.pdfId?element('a','View PDF'):null;if(open){open.href='/api/course-pdf/'+l.pdfId;open.target='_blank';open.rel='noopener';}wrap.append(name,type,body,pdf,upload,...(open?[open]:[]),element('button','Remove lesson',()=>{c.lessons.splice(j,1);render();}));s.append(wrap);});s.append(element('button','Add lesson',()=>{c.lessons.push({title:'New lesson',type:'text',content:''});render();}),element('button','Remove chapter',()=>{outline.chapters.splice(i,1);render();}));root.append(s);});}
+function input(tag,value,placeholder,change){const x=element(tag);x.value=value||'';x.placeholder=placeholder;x.setAttribute('aria-label',placeholder);x.addEventListener('input',()=>change(x.value));return x;}
+function render(){sources();const root=el('chapters');root.replaceChildren();outline.chapters.forEach((c,i)=>{
+ const section=element('section');section.append(input('input',c.title,'Chapter title',v=>c.title=v));
+ c.lessons.forEach((l,j)=>{
+  const wrap=element('div');wrap.className='lesson';
+  const name=input('input',l.title,'Lesson title',v=>l.title=v),type=element('select');type.setAttribute('aria-label','Lesson type');
+  for(const t of ['text','youtube','quiz']){const o=element('option',t);o.value=t;type.append(o);}type.value=l.type;
+  type.addEventListener('change',()=>{l.type=type.value;render();});
+  const body=input('textarea',l.content,'Lesson text, YouTube watch URL, or quiz questions and answers',v=>l.content=v);body.rows=5;
+  const upload=element('input');upload.type='file';upload.accept='application/pdf,.pdf';upload.setAttribute('aria-label','Attach PDF to this lesson');
+  upload.addEventListener('change',async()=>{const courseId=active;try{const file=upload.files[0];if(!file)return;if(file.size>1800000)throw Error('PDF must be under 1.8 MB.');const data=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(Error('Could not read PDF'));reader.readAsDataURL(file);});const d=await api('/api/course-pdf',{method:'POST',body:JSON.stringify({courseId,name:file.name,data})});if(active!==courseId||!outline.chapters.some(ch=>ch.lessons.includes(l)))throw Error('Course changed during upload. Reload the original course before attaching more files.');l.pdfId=d.file.id;l.pdfName=d.file.name;render();say('PDF uploaded. Save course to keep the lesson attachment.');}catch(e){say(e.message);}});
+  wrap.append(name,type,body,element('p',l.pdfId?'Attached PDF: '+(l.pdfName||'PDF'):'Optional PDF attachment'),upload);
+  if(l.pdfId){const open=element('a','View PDF');open.href='/api/course-pdf/'+l.pdfId;open.target='_blank';open.rel='noopener';wrap.append(open);}
+  if(l.type==='youtube')wrap.append(element('button','Preview video',()=>{const id=CourseTools.youtubeId(l.content);if(!id){say('Enter a valid HTTPS YouTube watch, short, embed or youtu.be URL.');return;}wrap.querySelector('iframe')?.remove();const frame=element('iframe');frame.src='https://www.youtube-nocookie.com/embed/'+id;frame.title=l.title||'YouTube lesson';frame.allow='fullscreen; encrypted-media; picture-in-picture';frame.referrerPolicy='strict-origin-when-cross-origin';frame.style.cssText='width:100%;aspect-ratio:16/9;border:0';wrap.append(frame);}));
+  else wrap.append(element('button','Regenerate lesson',()=>generate({scope:'lesson',chapter:i,lesson:j})));
+  wrap.append(element('button','Remove lesson',()=>{c.lessons.splice(j,1);render();}));section.append(wrap);
+ });
+ section.append(element('button','Add lesson',()=>{c.lessons.push({title:'New lesson',type:'text',content:''});render();}),element('button','Regenerate chapter',()=>generate({scope:'chapter',chapter:i})),element('button','Remove chapter',()=>{outline.chapters.splice(i,1);render();}));root.append(section);
+});}
+async function save(nextPublished=published){if(!active)throw Error('Select a course first.');const courseId=active;await api('/api/course-drafts/'+courseId,{method:'PUT',body:JSON.stringify({title:el('course-title').value,outline,published:nextPublished})});if(active===courseId){published=nextPublished;publication();}await list();say('Course saved'+(nextPublished?' and published.':'.'));}
+async function generate(target={scope:'course'}){
+ if(generating)return;try{if(!active)throw Error('Select a course first.');const courseId=active,snapshot=JSON.stringify(outline),selection=el('material').value;
+ const [i,j]=selection.split(':').map(Number),selected=selection?outline.chapters[i]?.lessons[j]:null;
+ const chapter=outline.chapters[target.chapter],lesson=chapter?.lessons[target.lesson];
+ const targetChapter=target.scope==='lesson'?{title:chapter.title,lessons:[lesson]}:target.scope==='chapter'?{title:chapter.title,lessons:chapter.lessons.filter(l=>l.type!=='youtube')}:undefined;
+ if(targetChapter&&!targetChapter.lessons.length)throw Error('Add a text or quiz lesson before regenerating.');
+ const material=selected||(target.scope==='lesson'?lesson:null);
+ const context=material?.content||(targetChapter?targetChapter.lessons.map(l=>l.content).join('\n'):'');
+ generating=true;el('generate').disabled=true;say('Generating '+target.scope+'...');
+ const d=await api('/api/course-generate',{method:'POST',body:JSON.stringify({source:[el('source').value,context].filter(Boolean).join('\n'),topic:el('topic').value,pdfId:material?.pdfId,courseId,scope:target.scope,target:targetChapter})});
+ if(active!==courseId||JSON.stringify(outline)!==snapshot)throw Error('Course changed during generation. No generated content was applied. Try again.');
+ outline=CourseTools.applyGeneration(outline,d.outline,target);render();say(target.scope==='course'?'Generated chapters added. Review, then Save course.':'Selected '+target.scope+' regenerated. Other lessons and attachments were preserved. Review, then Save course.');
+ }catch(e){say(e.message);}finally{generating=false;el('generate').disabled=false;}
+}
 el('create').addEventListener('click',async()=>{try{const d=await api('/api/course-drafts',{method:'POST',body:JSON.stringify({title:el('new-title').value})});await list();await load(d.course.id);}catch(e){say(e.message);}});
 el('add-chapter').addEventListener('click',()=>{outline.chapters.push({title:'New chapter',lessons:[]});render();});
-el('save').addEventListener('click',async()=>{try{if(!active)throw Error('Create a course first.');await api('/api/course-drafts/'+active,{method:'PUT',body:JSON.stringify({title:el('course-title').value,outline})});say('Course saved');await list();}catch(e){say(e.message);}});
-let generating=false;
-el('generate').addEventListener('click',async()=>{if(generating)return;try{if(!active)throw Error('Create or select a course first.');
-const courseId=active,snapshot=JSON.stringify(outline),selection=el('material').value;
-const [i,j]=selection.split(':').map(Number),lesson=selection?outline.chapters[i]?.lessons[j]:null;
-generating=true;el('generate').disabled=true;say('Generating...');
-const d=await api('/api/course-generate',{method:'POST',body:JSON.stringify({source:[el('source').value,lesson?.content||''].filter(Boolean).join('\n'),topic:el('topic').value,pdfId:lesson?.pdfId,courseId})});
-if(active!==courseId||JSON.stringify(outline)!==snapshot)throw Error('The course changed during generation. No generated content was applied. Try again.');
-outline={chapters:[...outline.chapters,...d.outline.chapters]};render();say('Generated chapters added. Review, then Save course.');
-}catch(e){say(e.message);}finally{generating=false;el('generate').disabled=false;}});
-window.addEventListener('error',e=>say('Page error: '+e.message));window.addEventListener('unhandledrejection',e=>say('Request error: '+(e.reason?.message||String(e.reason))));
+el('save').addEventListener('click',()=>save().catch(e=>say(e.message)));
+el('publish').addEventListener('click',()=>{if(!published&&!window.confirm('Publish this course publicly? Lesson text, quizzes and YouTube links will be visible to anyone with the course link. PDFs remain private.'))return;save(!published).catch(e=>say(e.message));});
+el('generate').addEventListener('click',()=>generate());
+window.addEventListener('error',e=>say('Page error: '+e.message));window.addEventListener('unhandledrejection',e=>say(e.reason?.message||'Request failed.'));
 api('/api/me').then(d=>{if(!d.user)location.href='/login';else list().catch(e=>say(e.message));}).catch(e=>say(e.message));

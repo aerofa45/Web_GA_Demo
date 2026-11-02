@@ -1,4 +1,5 @@
 'use strict';
+const {youtubeId}=require('./public/course-tools');
 
 // Shared boundary for instructor saves and untrusted model responses.
 function validateOutline(outline,{generated=false}={}) {
@@ -11,7 +12,7 @@ function validateOutline(outline,{generated=false}={}) {
       if(generated&&(l.pdfId!==undefined||!l.content.trim()||l.type==='youtube'))invalid();
       if(l.pdfId!==undefined&&!/^[a-f0-9]{48}$/.test(l.pdfId))invalid();
       if(l.pdfName!==undefined&&(typeof l.pdfName!=='string'||l.pdfName.length>160))invalid();
-      if(l.type==='youtube'&&l.content&&!/^https:\/\/(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/)[\w-]{11}(?:[&#?].*)?$/.test(l.content))invalid();
+      if(l.type==='youtube'&&l.content&&!youtubeId(l.content))invalid();
     }
   }
   if(JSON.stringify(outline).length>240000)invalid();
