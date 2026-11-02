@@ -408,7 +408,7 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
           return json(res,200,{url:'https://drive.google.com/file/d/'+encodeURIComponent(file.id)+'/view',notice:'Google Drive controls playback and requires access with your approved Google account.'});
         }
 
-        const lmsMatch=p.match(/^\/api\/lms\/([a-f0-9]{48})(?:\/(assignments|submissions|quizzes|attempts|progress|gradebook))?$/);
+        const lmsMatch=p.match(/^\/api\/lms\/([a-f0-9]{48})(?:\/(assignments|submissions|submission-file|quizzes|attempts|progress|gradebook))?$/);
         if(lmsMatch){
           const user=await auth(req),courseId=lmsMatch[1],kind=lmsMatch[2],now=Date.now();
           const found=await store.rest('forma_course_drafts','id='+eq(courseId)+'&select=id,user_id,published,outline&limit=1');
@@ -437,6 +437,35 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
             if(old.length)throw new HttpError(409,'Submission already exists. Contact instructor to request a resubmission.');
             await store.rest('forma_submissions','','POST',{assignment_id:assignmentId,student_id:user.id,content,submitted_at:now});
             return json(res,201,{ok:true});
+          }
+          if(method==='POST'&&kind==='submission-file'){
+            if(owner)throw new HttpError(403,'Students only.');
+            const b=await body(),assignmentId=String(b.assignmentId||''),raw=String(b.data||''),name=clean(b.name,160)||'Assignment.pdf';
+            const assignment=await store.rest('forma_assignments','id='+eq(assignmentId)+'&course_id='+eq(courseId)+'&select=id,due_at&limit=1');
+            if(!assignment.length)throw new HttpError(404,'Assignment not found.');
+            if(assignment[0].due_at!==null&&now>Number(assignment[0].due_at))throw new HttpError(409,'Assignment deadline has passed.');
+            if(!/^data:application\/pdf;base64,[A-Za-z0-9+/]+={0,2}$/.test(raw)||!name.toLowerCase().endsWith('.pdf'))throw new HttpError(400,'Upload a PDF.');
+            const bytes=Buffer.from(raw.split(',')[1],'base64');
+            if(bytes.length<8||bytes.length>1800000||bytes.subarray(0,5).toString()!=='%PDF-')throw new HttpError(400,'PDF must be valid and under 1.8 MB.');
+            const prior=await store.rest('forma_submissions','assignment_id='+eq(assignmentId)+'&student_id='+eq(user.id)+'&select=student_id&limit=1');
+            if(prior.length)throw new HttpError(409,'This assignment already has a submission.');
+            const key='submissions/'+courseId+'/'+assignmentId+'/'+user.id+'/'+id()+'.pdf';
+            const uploaded=await fetcher(store.url+'/storage/v1/object/forma-course-pdfs/'+key,{method:'POST',headers:{apikey:store.key,Authorization:'Bearer '+store.key,'Content-Type':'application/pdf','x-upsert':'false'},body:bytes,signal:AbortSignal.timeout(20000)});
+            if(!uploaded.ok)throw new HttpError(503,'Private PDF storage failed.');
+            await store.rest('forma_submission_files','','POST',{assignment_id:assignmentId,student_id:user.id,object_key:key,file_name:name,size_bytes:bytes.length,created:now});
+            await store.rest('forma_submissions','','POST',{assignment_id:assignmentId,student_id:user.id,content:'[PDF submission] '+name,submitted_at:now});
+            return json(res,201,{ok:true,fileName:name});
+          }
+          if(method==='GET'&&kind==='submission-file'){
+            const assignmentId=url.searchParams.get('assignmentId'),studentId=owner?(url.searchParams.get('studentId')||''):user.id;
+            const assignments=await store.rest('forma_assignments','id='+eq(assignmentId)+'&course_id='+eq(courseId)+'&select=id&limit=1');
+            if(!assignments.length||!studentId)throw new HttpError(404,'Submission file not found.');
+            const rows=await store.rest('forma_submission_files','assignment_id='+eq(assignmentId)+'&student_id='+eq(studentId)+'&select=object_key,file_name&limit=1');
+            if(!rows.length)throw new HttpError(404,'Submission file not found.');
+            const download=await fetcher(store.url+'/storage/v1/object/forma-course-pdfs/'+rows[0].object_key,{headers:{apikey:store.key,Authorization:'Bearer '+store.key},signal:AbortSignal.timeout(20000)});
+            if(!download.ok)throw new HttpError(503,'Submission file unavailable.');
+            const bytes=Buffer.from(await download.arrayBuffer());
+            res.writeHead(200,{'Content-Type':'application/pdf','Cache-Control':'no-store','Content-Disposition':'attachment; filename="submission.pdf"','Content-Length':bytes.length});return res.end(bytes);
           }
           if(method==='GET'&&kind==='submissions'){
             const assignments=await store.rest('forma_assignments','course_id='+eq(courseId)+'&select=id,title,max_points');
