@@ -11,6 +11,10 @@ function validateOutline(outline,{generated=false}={}) {
       if(!l||typeof l.title!=='string'||!l.title.trim()||l.title.length>180||typeof l.content!=='string'||l.content.length>20000||!['text','youtube','quiz'].includes(l.type))invalid();
       if(generated&&(l.pdfId!==undefined||!l.content.trim()||l.type==='youtube'))invalid();
       if(l.pdfId!==undefined&&!/^[a-f0-9]{48}$/.test(l.pdfId))invalid();
+      if(l.driveFile!==undefined){
+        const d=l.driveFile;
+        if(generated||!d||typeof d!=='object'||!/^[A-Za-z0-9_-]{10,180}$/.test(d.id)||typeof d.name!=='string'||!d.name.trim()||d.name.length>180||typeof d.mimeType!=='string'||!d.mimeType.startsWith('video/'))invalid();
+      }
       if(l.pdfName!==undefined&&(typeof l.pdfName!=='string'||l.pdfName.length>160))invalid();
       if(l.type==='youtube'&&l.content&&!youtubeId(l.content))invalid();
     }
