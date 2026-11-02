@@ -119,6 +119,25 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
         const expected=crypto.createHmac('sha256',secret).update(timestamp+'.').update(raw).digest('hex');
         if(!signatures.some(sig=>crypto.timingSafeEqual(Buffer.from(sig,'hex'),Buffer.from(expected,'hex'))))throw new HttpError(400,'Invalid webhook signature.');
         const event=JSON.parse(raw.toString());
+        if(event.type==='checkout.session.completed'&&event.data?.object?.mode==='subscription'){
+          const session=event.data.object;
+          if(session.livemode!==false||!/^sub_/.test(session.subscription||'')||session.payment_status!=='paid')return json(res,200,{received:true});
+          const rows=await store.rest('forma_test_subscriptions','checkout_session_id='+eq(session.id)+'&status=eq.pending&select=id,amount_cents,currency&limit=1');
+          if(!rows.length)return json(res,200,{received:true});
+          const sub=rows[0];
+          if(session.metadata?.order_id!==sub.id||session.currency!==sub.currency||Number(session.amount_total)!==Number(sub.amount_cents))throw new HttpError(400,'Subscription payment mismatch.');
+          await store.rest('forma_test_subscriptions','id='+eq(sub.id)+'&status=eq.pending','PATCH',{status:'active',stripe_subscription_id:session.subscription,updated:Date.now()});
+          return json(res,200,{received:true,notice:'Test subscription recorded; instructor course approval remains separate.'});
+        }
+        if(['customer.subscription.deleted','customer.subscription.updated'].includes(event.type)){
+          const subscription=event.data?.object;
+          if(subscription?.livemode!==false||!/^sub_/.test(subscription.id||''))return json(res,200,{received:true});
+          const rows=await store.rest('forma_test_subscriptions','stripe_subscription_id='+eq(subscription.id)+'&select=id,status&limit=1');
+          if(!rows.length)return json(res,200,{received:true});
+          const status=event.type==='customer.subscription.deleted'?'canceled':(['active','past_due','unpaid','canceled'].includes(subscription.status)?subscription.status:'pending');
+          await store.rest('forma_test_subscriptions','id='+eq(rows[0].id),'PATCH',{status,updated:Date.now()});
+          return json(res,200,{received:true});
+        }
         if(!['checkout.session.completed','checkout.session.async_payment_succeeded'].includes(event.type))return json(res,200,{received:true});
         const session=event.data?.object;
         if(!session||session.livemode!==false||session.payment_status!=='paid'||typeof session.id!=='string')return json(res,200,{received:true});
@@ -156,6 +175,35 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
           if(req.headers.origin&&req.headers.origin!==expected)throw new HttpError(403,'Invalid request origin.');
           if(req.headers['sec-fetch-site']==='cross-site')throw new HttpError(403,'Cross-site requests are blocked.');
           if(!String(req.headers['content-type']||'').startsWith('application/json'))throw new HttpError(415,'Send JSON.');
+        }
+        if(p==='/api/stripe-test/subscription-checkout'&&method==='POST'){
+          const key=process.env.STRIPE_TEST_SECRET_KEY||'';
+          if(!/^(sk_test_|rk_test_)/.test(key))throw new HttpError(503,'Stripe test mode is not configured.');
+          const user=await auth(req),b=await read(req),courseId=String(b.courseId||'');
+          if(!/^[a-f0-9]{48}$/.test(courseId))throw new HttpError(400,'Invalid course.');
+          const courses=await store.rest('forma_course_drafts','id='+eq(courseId)+'&select=id,user_id,title,published,outline&limit=1');
+          const course=courses[0];if(!course||!course.published||course.outline?.archived||course.user_id===user.id)throw new HttpError(404,'Course unavailable.');
+          const prices=await store.rest('forma_course_subscription_prices','course_id='+eq(courseId)+'&enabled=eq.true&select=amount_cents,currency,interval&limit=1');
+          if(!prices.length)throw new HttpError(409,'Course subscriptions are not enabled.');
+          const verified=await store.rest('forma_google_connections','user_id='+eq(user.id)+'&role=eq.student&email='+eq(user.email.toLowerCase())+'&select=google_sub&limit=1');
+          if(!verified.length)throw new HttpError(403,'Verify your student email before subscribing.');
+          const previous=await store.rest('forma_test_subscriptions','course_id='+eq(courseId)+'&student_id='+eq(user.id)+'&status=eq.active&select=id&limit=1');
+          if(previous.length)throw new HttpError(409,'You already have an active test subscription.');
+          const price=prices[0],orderId=id(),base=googleOrigin();
+          if(!/^https:\/\//.test(base))throw new HttpError(503,'Site origin missing.');
+          const form=new URLSearchParams({mode:'subscription',success_url:base+'/course/'+courseId+'?subscription=test-success',cancel_url:base+'/course/'+courseId+'?subscription=cancelled',customer_email:user.email,'line_items[0][price_data][currency]':price.currency,'line_items[0][price_data][unit_amount]':String(price.amount_cents),'line_items[0][price_data][recurring][interval]':price.interval,'line_items[0][price_data][product_data][name]':clean(course.title,140),'line_items[0][quantity]':'1','metadata[order_id]':orderId,'subscription_data[metadata][order_id]':orderId});
+          const response=await fetcher('https://api.stripe.com/v1/checkout/sessions',{method:'POST',headers:{Authorization:'Bearer '+key,'Content-Type':'application/x-www-form-urlencoded','Idempotency-Key':'forma-test-sub-'+orderId},body:form,signal:AbortSignal.timeout(20000)});
+          if(!response.ok)throw new HttpError(502,'Stripe test subscription checkout could not be created.');
+          const session=await response.json();
+          if(session.livemode!==false||!/^cs_test_/.test(session.id||'')||!/^https:\/\//.test(session.url||''))throw new HttpError(502,'Stripe did not return a test session.');
+          await store.rest('forma_test_subscriptions','','POST',{id:orderId,course_id:courseId,student_id:user.id,checkout_session_id:session.id,status:'pending',amount_cents:price.amount_cents,currency:price.currency,created:Date.now(),updated:Date.now()});
+          return json(res,201,{url:session.url,mode:'test'});
+        }
+        if(p==='/api/stripe-test/subscription-status'&&method==='GET'){
+          const user=await auth(req),courseId=String(url.searchParams.get('courseId')||'');
+          if(!/^[a-f0-9]{48}$/.test(courseId))throw new HttpError(400,'Invalid course.');
+          const rows=await store.rest('forma_test_subscriptions','course_id='+eq(courseId)+'&student_id='+eq(user.id)+'&select=status,updated&order=updated.desc&limit=1');
+          return json(res,200,{status:rows[0]?.status||'none',testOnly:true});
         }
         if(p==='/api/stripe-test/checkout'&&method==='POST'){
           const key=process.env.STRIPE_TEST_SECRET_KEY||'';
