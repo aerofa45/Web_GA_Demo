@@ -5,6 +5,15 @@
  const enroll=async()=>{const r=await fetch('/api/course-enrollments/'+id,{credentials:'same-origin'});if(!r.ok)return null;return r.json();};
  const info=await enroll();
  if(info&&!data.owner){
+  const verification=document.createElement('section'),label=document.createElement('p'),button=document.createElement('button');
+  label.textContent='Checking verified Google email...';button.textContent='Verify email with Google';button.type='button';button.hidden=true;
+  button.addEventListener('click',async()=>{
+   try{const r=await fetch('/api/google/connect?role=student',{credentials:'same-origin'}),d=await r.json();if(!r.ok)throw Error(d.error||'Could not start verification');location.assign(d.authorizationUrl);}catch(e){label.textContent=e.message;}
+  });
+  verification.append(label,button);document.getElementById('content').append(verification);
+  try{const r=await fetch('/api/google/student-status',{credentials:'same-origin'}),d=await r.json();if(!r.ok)throw Error(d.error||'Verification unavailable');label.textContent=d.verified?'Verified Google email: '+d.email:'Verify ownership of '+d.email+' using Google before requesting private lessons.';button.hidden=!!d.verified;}catch(e){label.textContent=e.message;}
+ }
+ if(info&&!data.owner){
   const panel=document.createElement('section'),heading=document.createElement('h2');heading.textContent='Private video enrollment';panel.append(heading);
   const msg=document.createElement('p');msg.textContent='Your status: '+info.status;panel.append(msg);
   if(info.status==='none'){
