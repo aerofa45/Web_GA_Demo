@@ -204,3 +204,16 @@ test('sandbox subscription endpoints deny unconfigured checkout and isolate stud
  tables.forma_test_subscriptions.push({id:'order',course_id:cid,student_id:'b'.repeat(48),status:'active',updated:Date.now()});
  assert.equal((await req('/api/stripe-test/subscription-status?courseId='+cid,undefined,true,'GET')).body.status,'none');
 });
+
+test('sandbox subscription pricing is owner-only and student status stays private',async t=>{
+ const {tables,req}=await setup(t),route='/api/stripe-test/subscription-price/'+cid;
+ assert.equal((await req(route,undefined,false,'GET')).status,401);
+ assert.equal((await req(route,undefined,true,'GET')).status,200);
+ tables.forma_users.push({id:'b'.repeat(48),email:'student@example.com'});
+ tables.forma_sessions[0].user_id='b'.repeat(48);
+ assert.equal((await req(route,undefined,true,'GET')).status,404);
+ assert.equal((await req(route,{amountCents:1000,interval:'month',enabled:true})).status,404);
+ assert.equal((await req('/api/stripe-test/subscription-checkout',{courseId:cid})).status,503);
+ tables.forma_test_subscriptions.push({id:'order',course_id:cid,student_id:uid,status:'active',updated:Date.now()});
+ assert.equal((await req('/api/stripe-test/subscription-status?courseId='+cid,undefined,true,'GET')).body.status,'none');
+});
