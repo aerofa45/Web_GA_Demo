@@ -11,3 +11,5 @@ Added privacy-enhanced YouTube embeds and a shared HTTPS URL parser for watch, s
 Validation: npm ci succeeded (zero reported vulnerabilities); npm test passed 17 tests, zero failed. Includes portfolio regression, regeneration preservation and mismatch rejection, YouTube hostile-host/scheme rejection, publication owner/anonymous rules, and unpublication. Syntax checks and whitespace check passed. Hosted verification is recorded separately after deployment.
 
 No migration is required: published already exists. No production, Google OAuth scope, billing, or payment changes. Drive/OAuth, student enrollment, submissions and grades remain subsequent work.
+
+Added Delete course with recoverable Trash and Restore. Deletion unpublishes immediately, retains attachments and outline, and blocks edits until restored. Restoration always returns a private draft. No destructive database operation or migration is used; the archive marker is stored in the existing outline JSON. Tests: 18 passed, zero failed.

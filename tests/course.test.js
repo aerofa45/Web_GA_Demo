@@ -81,3 +81,23 @@ test('regeneration constrains replacement shape and rejects unsupported targets'
  assert.equal((await req('/api/course-generate',{source,scope:'all'})).status,400);
  assert.equal((await req('/api/course-generate',{source,scope:'chapter',target:{title:'Video',lessons:[{title:'Video',type:'youtube',content:'https://youtu.be/dQw4w9WgXcQ'}]}})).status,400);
 });
+
+test('course deletion moves to owner-only Trash, revokes publication, and restores intact',async t=>{
+ const {req,tables}=await setup(t),route='/api/course-drafts/'+cid,view='/api/course-view/'+cid;
+ const original=structuredClone(tables.forma_course_drafts[0].outline);tables.forma_course_drafts[0].published=true;
+ assert.equal((await req(route,{},false,'DELETE')).status,401);
+ assert.equal((await req(route,{},true,'DELETE')).status,200);
+ assert.equal(tables.forma_course_drafts.length,1);assert.equal(tables.forma_course_drafts[0].published,false);
+ assert.equal((await req('/api/course-drafts',undefined,true,'GET')).body.courses.length,0);
+ assert.equal((await req('/api/course-drafts?archived=true',undefined,true,'GET')).body.courses.length,1);
+ assert.equal((await req(view,undefined,false,'GET')).status,404);
+ assert.equal((await req(route,undefined,true,'GET')).status,404);
+ assert.equal((await req(route,{title:'Old client save',outline:original},true,'PUT')).status,409);
+ assert.equal((await req(route+'/restore',{},true,'POST')).status,200);
+ assert.deepEqual(tables.forma_course_drafts[0].outline,original);assert.equal(tables.forma_course_drafts[0].published,false);
+ assert.equal((await req('/api/course-drafts',undefined,true,'GET')).body.courses.length,1);
+ tables.forma_course_drafts[0].user_id='b'.repeat(48);
+ assert.equal((await req(route,{},true,'DELETE')).status,404);
+ assert.equal((await req(route+'/restore',{},true,'POST')).status,404);
+ assert.equal((await req('/api/course-drafts?archived=true',undefined,true,'GET')).body.courses.length,0);
+});

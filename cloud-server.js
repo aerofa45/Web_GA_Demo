@@ -128,7 +128,7 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
           const user=await auth(req);await rate(req,'pdf:'+user.id,20);
           const b=await read(req),courseId=String(b.courseId||''),raw=String(b.data||'');
           if(!/^[a-f0-9]{48}$/.test(courseId))throw new HttpError(400,'Select a course first.');
-          const owned=await store.rest('forma_course_drafts',`id=${eq(courseId)}&user_id=${eq(user.id)}&select=id,published&limit=1`);
+          const owned=await store.rest('forma_course_drafts',`id=${eq(courseId)}&user_id=${eq(user.id)}&select=id,published,outline&limit=1`);
           if(!owned.length)throw new HttpError(404,'Course not found.');
           if(!/^data:application\/pdf;base64,[A-Za-z0-9+/]+={0,2}$/.test(raw))throw new HttpError(400,'Upload a PDF file.');
           const bytes=Buffer.from(raw.split(',')[1],'base64');
@@ -151,7 +151,7 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
         if(p==='/api/course-drafts'&&method==='GET'){
           const user=await auth(req);
           const rows=await store.rest('forma_course_drafts',`user_id=${eq(user.id)}&select=id,title,outline,published,created,updated&order=updated.desc&limit=100`);
-          return json(res,200,{courses:rows});
+          return json(res,200,{courses:rows.filter(c=>Boolean(c.outline?.archived)===(url.searchParams.get('archived')==='true'))});
         }
         if(p==='/api/course-drafts'&&method==='POST'){
           const user=await auth(req);await rate(req,'courses:'+user.id,30);const b=await read(req);
@@ -163,13 +163,15 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
         if(courseMatch&&method==='GET'){
           const user=await auth(req);
           const rows=await store.rest('forma_course_drafts',`id=${eq(courseMatch[1])}&user_id=${eq(user.id)}&select=*&limit=1`);
-          if(!rows.length)throw new HttpError(404,'Course not found.');return json(res,200,{course:rows[0]});
+          if(!rows.length||rows[0].outline?.archived)throw new HttpError(404,'Course not found.');return json(res,200,{course:rows[0]});
         }
         if(courseMatch&&method==='PUT'){
           const user=await auth(req);await rate(req,'course-edit:'+user.id,120);
-          const rows=await store.rest('forma_course_drafts',`id=${eq(courseMatch[1])}&user_id=${eq(user.id)}&select=id,published&limit=1`);
+          const rows=await store.rest('forma_course_drafts',`id=${eq(courseMatch[1])}&user_id=${eq(user.id)}&select=id,published,outline&limit=1`);
           if(!rows.length)throw new HttpError(404,'Course not found.');
+          if(rows[0].outline?.archived)throw new HttpError(409,'Restore this course from Trash before editing.');
           const b=await read(req),title=clean(b.title,140),outline=b.outline;
+          if(outline?.archived!==undefined)throw new HttpError(400,'Use the course Trash controls.');
           if(!title)throw new HttpError(400,'Course title is required.');
           try{validateOutline(outline);}catch{throw new HttpError(400,'Invalid course outline.');}
           if(b.published!==undefined&&typeof b.published!=='boolean')throw new HttpError(400,'Invalid publication status.');
@@ -181,12 +183,21 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
           await store.rest('forma_course_drafts',`id=${eq(courseMatch[1])}&user_id=${eq(user.id)}`,'PATCH',{title,outline,...(b.published===undefined?{}:{published:b.published}),updated:Date.now()});
           return json(res,200,{ok:true});
         }
+        const restoreMatch=p.match(/^\/api\/course-drafts\/([a-f0-9]{48})\/restore$/);
+        if((courseMatch&&method==='DELETE')||(restoreMatch&&method==='POST')){
+          const user=await auth(req),courseId=courseMatch?.[1]||restoreMatch[1];await rate(req,'course-edit:'+user.id,120);
+          const rows=await store.rest('forma_course_drafts','id='+eq(courseId)+'&user_id='+eq(user.id)+'&select=id,outline&limit=1');
+          if(!rows.length)throw new HttpError(404,'Course not found.');
+          const outline={...rows[0].outline};if(method==='DELETE')outline.archived=true;else delete outline.archived;
+          await store.rest('forma_course_drafts','id='+eq(courseId)+'&user_id='+eq(user.id),'PATCH',{outline,published:false,updated:Date.now()});
+          return json(res,200,{ok:true});
+        }
         const viewMatch=p.match(/^\/api\/course-view\/([a-f0-9]{48})$/);
         if(viewMatch&&method==='GET'){
           const viewer=await current(req);
           const rows=await store.rest('forma_course_drafts','id='+eq(viewMatch[1])+'&select=id,user_id,title,outline,published&limit=1');
           const course=rows[0];
-          if(!course||(!course.published&&course.user_id!==viewer?.id))throw new HttpError(404,'Course not found.');
+          if(!course||course.outline?.archived||(!course.published&&course.user_id!==viewer?.id))throw new HttpError(404,'Course not found.');
           const owner=course.user_id===viewer?.id;
           const outline={chapters:course.outline.chapters.map(c=>({title:c.title,lessons:c.lessons.map(l=>({title:l.title,type:l.type,content:l.content,...(owner&&l.pdfId?{pdfId:l.pdfId,pdfName:l.pdfName}:{})}))}))};
           return json(res,200,{course:{id:course.id,title:course.title,published:course.published,outline},owner});
