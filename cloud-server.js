@@ -407,6 +407,104 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
           }
           return json(res,200,{url:'https://drive.google.com/file/d/'+encodeURIComponent(file.id)+'/view',notice:'Google Drive controls playback and requires access with your approved Google account.'});
         }
+
+        const lmsMatch=p.match(/^\/api\/lms\/([a-f0-9]{48})(?:\/(assignments|submissions|quizzes|attempts|progress|gradebook))?$/);
+        if(lmsMatch){
+          const user=await auth(req),courseId=lmsMatch[1],kind=lmsMatch[2],now=Date.now();
+          const found=await store.rest('forma_course_drafts','id='+eq(courseId)+'&select=id,user_id,published,outline&limit=1');
+          const course=found[0];if(!course||course.outline?.archived)throw new HttpError(404,'Course not found.');
+          const owner=course.user_id===user.id;
+          const enrolled=owner?true:(course.published&&(await store.rest('forma_course_enrollments','course_id='+eq(courseId)+'&email='+eq(user.email.toLowerCase())+'&status=eq.approved&select=email&limit=1')).length>0);
+          if(!enrolled)throw new HttpError(403,'Approved course enrollment required.');
+          const admin=()=>{if(!owner)throw new HttpError(403,'Instructor only.');};
+          const body=async()=>await read(req);
+          if(method==='GET'&&kind==='assignments'){
+            const assignments=await store.rest('forma_assignments','course_id='+eq(courseId)+'&select=id,title,instructions,due_at,max_points,weight,created&order=created.asc');
+            return json(res,200,{assignments});
+          }
+          if(method==='POST'&&kind==='assignments'){
+            admin();const b=await body(),title=clean(b.title,140),instructions=clean(b.instructions,10000),max=Number(b.maxPoints||100),weight=Number(b.weight??1),due=b.dueAt==null?null:Number(b.dueAt);
+            if(!title||!Number.isFinite(max)||max<=0||max>10000||!Number.isFinite(weight)||weight<0||weight>100||due!==null&&(!Number.isSafeInteger(due)||due<0))throw new HttpError(400,'Invalid assignment.');
+            const record={id:id(),course_id:courseId,title,instructions,max_points:max,weight,due_at:due,created:now};await store.rest('forma_assignments','','POST',record);return json(res,201,{assignment:record});
+          }
+          if(method==='POST'&&kind==='submissions'){
+            if(owner)throw new HttpError(403,'Students only.');
+            const b=await body(),assignmentId=String(b.assignmentId||''),content=clean(b.content,20000);
+            const items=await store.rest('forma_assignments','id='+eq(assignmentId)+'&course_id='+eq(courseId)+'&select=id,due_at&limit=1');
+            if(!items.length||!content)throw new HttpError(400,'Choose an assignment and write your submission.');
+            if(items[0].due_at!==null&&now>Number(items[0].due_at))throw new HttpError(409,'Assignment deadline has passed.');
+            const old=await store.rest('forma_submissions','assignment_id='+eq(assignmentId)+'&student_id='+eq(user.id)+'&select=score&limit=1');
+            if(old.length)throw new HttpError(409,'Submission already exists. Contact instructor to request a resubmission.');
+            await store.rest('forma_submissions','','POST',{assignment_id:assignmentId,student_id:user.id,content,submitted_at:now});
+            return json(res,201,{ok:true});
+          }
+          if(method==='GET'&&kind==='submissions'){
+            const assignments=await store.rest('forma_assignments','course_id='+eq(courseId)+'&select=id,title,max_points');
+            const rows=[];
+            for(const assignment of assignments){
+              const entries=await store.rest('forma_submissions','assignment_id='+eq(assignment.id)+(owner?'':'&student_id='+eq(user.id))+'&select=assignment_id,student_id,content,score,feedback,submitted_at,graded_at');
+              rows.push(...entries.map(e=>({...e,assignmentTitle:assignment.title,maxPoints:assignment.max_points})));
+            }
+            return json(res,200,{submissions:rows});
+          }
+          if(method==='PUT'&&kind==='submissions'){
+            admin();const b=await body(),assignmentId=String(b.assignmentId||''),studentId=String(b.studentId||''),score=Number(b.score),feedback=clean(b.feedback,5000);
+            const items=await store.rest('forma_assignments','id='+eq(assignmentId)+'&course_id='+eq(courseId)+'&select=max_points&limit=1');
+            if(!items.length||!Number.isFinite(score)||score<0||score>Number(items[0].max_points))throw new HttpError(400,'Score must be within assignment points.');
+            const rows=await store.rest('forma_submissions','assignment_id='+eq(assignmentId)+'&student_id='+eq(studentId)+'&select=student_id&limit=1');
+            if(!rows.length)throw new HttpError(404,'Submission not found.');
+            await store.rest('forma_submissions','assignment_id='+eq(assignmentId)+'&student_id='+eq(studentId),'PATCH',{score,feedback,graded_at:now});
+            return json(res,200,{ok:true});
+          }
+          if(method==='POST'&&kind==='quizzes'){
+            admin();const b=await body(),title=clean(b.title,140),questions=b.questions,maxAttempts=Number(b.maxAttempts||1);
+            if(!title||!Array.isArray(questions)||!questions.length||questions.length>60||!Number.isInteger(maxAttempts)||maxAttempts<1||maxAttempts>10||questions.some(q=>!q||typeof q.prompt!=='string'||!q.prompt.trim()||q.prompt.length>1000||!Array.isArray(q.options)||q.options.length<2||q.options.length>8||q.options.some(o=>typeof o!=='string'||!o.trim()||o.length>500)||!Number.isInteger(q.correct)||q.correct<0||q.correct>=q.options.length))throw new HttpError(400,'Invalid quiz questions.');
+            const record={id:id(),course_id:courseId,title,questions,max_attempts:maxAttempts,due_at:null,created:now};
+            await store.rest('forma_quizzes','','POST',record);return json(res,201,{id:record.id});
+          }
+          if(method==='GET'&&kind==='quizzes'){
+            const quizzes=await store.rest('forma_quizzes','course_id='+eq(courseId)+'&select=id,title,questions,max_attempts,due_at,created');
+            return json(res,200,{quizzes:quizzes.map(q=>({...q,questions:owner?q.questions:q.questions.map(x=>({prompt:x.prompt,options:x.options}))}))});
+          }
+          if(method==='POST'&&kind==='attempts'){
+            if(owner)throw new HttpError(403,'Students only.');
+            const b=await body(),quizId=String(b.quizId||''),answers=b.answers;
+            const quizzes=await store.rest('forma_quizzes','id='+eq(quizId)+'&course_id='+eq(courseId)+'&select=questions,max_attempts,due_at&limit=1');
+            const q=quizzes[0];
+            if(!q||!Array.isArray(answers)||answers.length!==q.questions.length||answers.some(a=>!Number.isInteger(a)))throw new HttpError(400,'Invalid quiz attempt.');
+            if(q.due_at!==null&&now>Number(q.due_at))throw new HttpError(409,'Quiz deadline passed.');
+            const old=await store.rest('forma_quiz_attempts','quiz_id='+eq(quizId)+'&student_id='+eq(user.id)+'&select=id');
+            if(old.length>=q.max_attempts)throw new HttpError(409,'Maximum attempts reached.');
+            const score=q.questions.reduce((n,x,i)=>n+(x.correct===answers[i]?1:0),0);
+            await store.rest('forma_quiz_attempts','','POST',{id:id(),quiz_id:quizId,student_id:user.id,answers,score,max_points:q.questions.length,submitted_at:now});
+            return json(res,201,{score,maxPoints:q.questions.length});
+          }
+          if(method==='GET'&&kind==='attempts'){
+            const quizzes=await store.rest('forma_quizzes','course_id='+eq(courseId)+'&select=id,title');
+            const attempts=[];
+            for(const quiz of quizzes){const rows=await store.rest('forma_quiz_attempts','quiz_id='+eq(quiz.id)+(owner?'':'&student_id='+eq(user.id))+'&select=student_id,quiz_id,score,max_points,submitted_at');attempts.push(...rows.map(r=>({...r,quizTitle:quiz.title}))); }
+            return json(res,200,{attempts});
+          }
+          if(method==='POST'&&kind==='progress'){
+            if(owner)throw new HttpError(403,'Students only.');
+            const b=await body(),i=b.chapterIndex,j=b.lessonIndex;
+            if(!Number.isInteger(i)||!Number.isInteger(j)||i<0||j<0||!course.outline.chapters[i]?.lessons[j])throw new HttpError(400,'Invalid lesson.');
+            const existing=await store.rest('forma_lesson_progress','course_id='+eq(courseId)+'&student_id='+eq(user.id)+'&chapter_index='+eq(i)+'&lesson_index='+eq(j)+'&select=completed_at&limit=1');
+            if(!existing.length)await store.rest('forma_lesson_progress','','POST',{course_id:courseId,student_id:user.id,chapter_index:i,lesson_index:j,completed_at:now});
+            return json(res,200,{ok:true});
+          }
+          if(method==='GET'&&kind==='progress'){
+            const rows=await store.rest('forma_lesson_progress','course_id='+eq(courseId)+(owner?'':'&student_id='+eq(user.id))+'&select=student_id,chapter_index,lesson_index,completed_at');
+            return json(res,200,{progress:rows});
+          }
+          if(method==='GET'&&kind==='gradebook'){
+            const assignments=await store.rest('forma_assignments','course_id='+eq(courseId)+'&select=id,title,max_points,weight');
+            const gradebook=[];
+            for(const a of assignments){const entries=await store.rest('forma_submissions','assignment_id='+eq(a.id)+(owner?'':'&student_id='+eq(user.id))+'&select=student_id,score,feedback,graded_at');gradebook.push(...entries.map(e=>({assignment:a.title,weight:a.weight,maxPoints:a.max_points,...e}))); }
+            return json(res,200,{grades:gradebook});
+          }
+          throw new HttpError(405,'Unsupported LMS operation.');
+        }
         const viewMatch=p.match(/^\/api\/course-view\/([a-f0-9]{48})$/);
         if(viewMatch&&method==='GET'){
           const viewer=await current(req);
