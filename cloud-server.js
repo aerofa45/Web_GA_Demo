@@ -408,7 +408,7 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
           return json(res,200,{url:'https://drive.google.com/file/d/'+encodeURIComponent(file.id)+'/view',notice:'Google Drive controls playback and requires access with your approved Google account.'});
         }
 
-        const lmsMatch=p.match(/^\/api\/lms\/([a-f0-9]{48})(?:\/(assignments|submissions|submission-file|quizzes|attempts|progress|gradebook))?$/);
+        const lmsMatch=p.match(/^\/api\/lms\/([a-f0-9]{48})(?:\/(assignments|submissions|submission-file|quizzes|attempts|progress|gradebook|attendance|notifications))?$/);
         if(lmsMatch){
           const user=await auth(req),courseId=lmsMatch[1],kind=lmsMatch[2],now=Date.now();
           const found=await store.rest('forma_course_drafts','id='+eq(courseId)+'&select=id,user_id,published,outline&limit=1');
@@ -418,21 +418,44 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
           if(!enrolled)throw new HttpError(403,'Approved course enrollment required.');
           const admin=()=>{if(!owner)throw new HttpError(403,'Instructor only.');};
           const body=async()=>await read(req);
+          if(method==='GET'&&kind==='notifications'){
+            const notifications=await store.rest('forma_notifications','user_id='+eq(user.id)+'&select=id,message,created,read_at&order=created.desc&limit=100');
+            return json(res,200,{notifications});
+          }
+          if(method==='POST'&&kind==='attendance'){
+            admin();const b=await body(),date=String(b.date||''),studentId=String(b.studentId||''),status=b.status;
+            if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(date)||!/^[a-f0-9]{48}$/.test(studentId)||!['present','absent','excused','late'].includes(status))throw new HttpError(400,'Invalid attendance.');
+            const student=await store.rest('forma_users','id='+eq(studentId)+'&select=email&limit=1');
+            if(!student.length)throw new HttpError(404,'Student not found.');
+            const access=await store.rest('forma_course_enrollments','course_id='+eq(courseId)+'&email='+eq(student[0].email.toLowerCase())+'&status=eq.approved&select=email&limit=1');
+            if(!access.length)throw new HttpError(403,'Student is not enrolled.');
+            const query='course_id='+eq(courseId)+'&student_id='+eq(studentId)+'&session_date='+eq(date);
+            const prev=await store.rest('forma_attendance',query+'&select=status&limit=1');
+            const data={course_id:courseId,student_id:studentId,session_date:date,status,notes:clean(b.notes,500),updated:now};
+            if(prev.length)await store.rest('forma_attendance',query,'PATCH',data);
+            else await store.rest('forma_attendance','','POST',data);
+            return json(res,200,{ok:true});
+          }
+          if(method==='GET'&&kind==='attendance'){
+            const rows=await store.rest('forma_attendance','course_id='+eq(courseId)+(owner?'':'&student_id='+eq(user.id))+'&select=student_id,session_date,status,notes&order=session_date.desc');
+            return json(res,200,{attendance:rows});
+          }
           if(method==='GET'&&kind==='assignments'){
-            const assignments=await store.rest('forma_assignments','course_id='+eq(courseId)+'&select=id,title,instructions,due_at,max_points,weight,created&order=created.asc');
+            const assignments=await store.rest('forma_assignments','course_id='+eq(courseId)+'&select=id,title,instructions,due_at,max_points,weight,late_minutes,late_penalty_percent,created&order=created.asc');
             return json(res,200,{assignments});
           }
           if(method==='POST'&&kind==='assignments'){
-            admin();const b=await body(),title=clean(b.title,140),instructions=clean(b.instructions,10000),max=Number(b.maxPoints||100),weight=Number(b.weight??1),due=b.dueAt==null?null:Number(b.dueAt);
+            admin();const b=await body(),title=clean(b.title,140),instructions=clean(b.instructions,10000),max=Number(b.maxPoints||100),weight=Number(b.weight??1),due=b.dueAt==null?null:Number(b.dueAt),lateMinutes=Number(b.lateMinutes||0),latePenalty=Number(b.latePenaltyPercent||0);
+            if(!Number.isInteger(lateMinutes)||lateMinutes<0||lateMinutes>100800||!Number.isFinite(latePenalty)||latePenalty<0||latePenalty>100)throw new HttpError(400,'Invalid late policy.');
             if(!title||!Number.isFinite(max)||max<=0||max>10000||!Number.isFinite(weight)||weight<0||weight>100||due!==null&&(!Number.isSafeInteger(due)||due<0))throw new HttpError(400,'Invalid assignment.');
-            const record={id:id(),course_id:courseId,title,instructions,max_points:max,weight,due_at:due,created:now};await store.rest('forma_assignments','','POST',record);return json(res,201,{assignment:record});
+            const record={id:id(),course_id:courseId,title,instructions,max_points:max,weight,due_at:due,late_minutes:lateMinutes,late_penalty_percent:latePenalty,created:now};await store.rest('forma_assignments','','POST',record);return json(res,201,{assignment:record});
           }
           if(method==='POST'&&kind==='submissions'){
             if(owner)throw new HttpError(403,'Students only.');
             const b=await body(),assignmentId=String(b.assignmentId||''),content=clean(b.content,20000);
-            const items=await store.rest('forma_assignments','id='+eq(assignmentId)+'&course_id='+eq(courseId)+'&select=id,due_at&limit=1');
+            const items=await store.rest('forma_assignments','id='+eq(assignmentId)+'&course_id='+eq(courseId)+'&select=id,due_at,late_minutes&limit=1');
             if(!items.length||!content)throw new HttpError(400,'Choose an assignment and write your submission.');
-            if(items[0].due_at!==null&&now>Number(items[0].due_at))throw new HttpError(409,'Assignment deadline has passed.');
+            if(items[0].due_at!==null&&now>Number(items[0].due_at)+Number(items[0].late_minutes||0)*60000)throw new HttpError(409,'Assignment deadline has passed.');
             const old=await store.rest('forma_submissions','assignment_id='+eq(assignmentId)+'&student_id='+eq(user.id)+'&select=score&limit=1');
             if(old.length)throw new HttpError(409,'Submission already exists. Contact instructor to request a resubmission.');
             await store.rest('forma_submissions','','POST',{assignment_id:assignmentId,student_id:user.id,content,submitted_at:now});
@@ -443,7 +466,7 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
             const b=await body(),assignmentId=String(b.assignmentId||''),raw=String(b.data||''),name=clean(b.name,160)||'Assignment.pdf';
             const assignment=await store.rest('forma_assignments','id='+eq(assignmentId)+'&course_id='+eq(courseId)+'&select=id,due_at&limit=1');
             if(!assignment.length)throw new HttpError(404,'Assignment not found.');
-            if(assignment[0].due_at!==null&&now>Number(assignment[0].due_at))throw new HttpError(409,'Assignment deadline has passed.');
+            if(assignment[0].due_at!==null&&now>Number(assignment[0].due_at)+Number(assignment[0].late_minutes||0)*60000)throw new HttpError(409,'Assignment deadline has passed.');
             if(!/^data:application\/pdf;base64,[A-Za-z0-9+/]+={0,2}$/.test(raw)||!name.toLowerCase().endsWith('.pdf'))throw new HttpError(400,'Upload a PDF.');
             const bytes=Buffer.from(raw.split(',')[1],'base64');
             if(bytes.length<8||bytes.length>1800000||bytes.subarray(0,5).toString()!=='%PDF-')throw new HttpError(400,'PDF must be valid and under 1.8 MB.');
@@ -478,11 +501,13 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
           }
           if(method==='PUT'&&kind==='submissions'){
             admin();const b=await body(),assignmentId=String(b.assignmentId||''),studentId=String(b.studentId||''),score=Number(b.score),feedback=clean(b.feedback,5000);
-            const items=await store.rest('forma_assignments','id='+eq(assignmentId)+'&course_id='+eq(courseId)+'&select=max_points&limit=1');
+            const items=await store.rest('forma_assignments','id='+eq(assignmentId)+'&course_id='+eq(courseId)+'&select=max_points,due_at,late_penalty_percent&limit=1');
             if(!items.length||!Number.isFinite(score)||score<0||score>Number(items[0].max_points))throw new HttpError(400,'Score must be within assignment points.');
-            const rows=await store.rest('forma_submissions','assignment_id='+eq(assignmentId)+'&student_id='+eq(studentId)+'&select=student_id&limit=1');
+            const rows=await store.rest('forma_submissions','assignment_id='+eq(assignmentId)+'&student_id='+eq(studentId)+'&select=student_id,submitted_at&limit=1');
             if(!rows.length)throw new HttpError(404,'Submission not found.');
-            await store.rest('forma_submissions','assignment_id='+eq(assignmentId)+'&student_id='+eq(studentId),'PATCH',{score,feedback,graded_at:now});
+            const late=items[0].due_at!==null&&Number(rows[0].submitted_at)>Number(items[0].due_at);
+            const adjusted=late?Math.round(score*(1-Number(items[0].late_penalty_percent||0)/100)*100)/100:score;
+            await store.rest('forma_submissions','assignment_id='+eq(assignmentId)+'&student_id='+eq(studentId),'PATCH',{score:adjusted,feedback,graded_at:now});
             return json(res,200,{ok:true});
           }
           if(method==='POST'&&kind==='quizzes'){
