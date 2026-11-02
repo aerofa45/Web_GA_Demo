@@ -67,7 +67,17 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
   function decryptGoogle(value){const buf=Buffer.from(value,'base64'),dec=crypto.createDecipheriv('aes-256-gcm',cipherSecret(),buf.subarray(0,12));dec.setAuthTag(buf.subarray(12,28));return Buffer.concat([dec.update(buf.subarray(28)),dec.final()]).toString('utf8');}
   async function googleToken(params){
     let response;try{response=await fetcher('https://oauth2.googleapis.com/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(params),signal:AbortSignal.timeout(15000)});}catch{throw new HttpError(502,'Google authorization request failed.');}
-    if(!response.ok)throw new HttpError(502,'Google authorization failed. Reconnect Google Drive.');
+    if(!response.ok){
+      const details=await response.json().catch(()=>({}));
+      const code=typeof details.error==='string'?details.error:'unknown';
+      // Never log tokens, codes, client secrets or provider descriptions.
+      console.error('Google OAuth token exchange failed:',response.status,code);
+      if(code==='invalid_client')throw new HttpError(502,'Google OAuth client ID or secret was rejected. Verify GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in Render.');
+      if(code==='invalid_grant')throw new HttpError(502,'Google authorization code was rejected. Verify the exact callback URL, then start Connect Google Drive again.');
+      if(code==='redirect_uri_mismatch')throw new HttpError(502,'Google OAuth redirect URI mismatch. Verify the test callback URI in Google Cloud.');
+      if(code==='invalid_request')throw new HttpError(502,'Google rejected the OAuth request. Check the configured callback and OAuth client.');
+      throw new HttpError(502,'Google token exchange failed ('+code+'). Start authorization again.');
+    }
     return response.json();
   }
   return async function handler(req,res){
