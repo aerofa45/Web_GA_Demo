@@ -183,7 +183,7 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
           if(!rows.length)throw new HttpError(409,'Connect Google Drive first.');
           const tokens=await googleToken({client_id:process.env.GOOGLE_CLIENT_ID,client_secret:process.env.GOOGLE_CLIENT_SECRET,refresh_token:decryptGoogle(rows[0].refresh_cipher),grant_type:'refresh_token'});
           if(!tokens.access_token)throw new HttpError(502,'Could not refresh Google Drive authorization.');
-          return json(res,200,{apiKey:process.env.GOOGLE_PICKER_API_KEY,clientId:process.env.GOOGLE_CLIENT_ID,accessToken:tokens.access_token,appId:process.env.GOOGLE_PROJECT_NUMBER||null});
+          return json(res,200,{apiKey:process.env.GOOGLE_PICKER_API_KEY,clientId:process.env.GOOGLE_CLIENT_ID,accessToken:tokens.access_token,appId:/^[0-9]{6,20}$/.test(process.env.GOOGLE_PROJECT_NUMBER||'')?process.env.GOOGLE_PROJECT_NUMBER:null});
         }
         if(p==='/api/google/selected-file'&&method==='POST'){
           const user=await auth(req),b=await read(req),fileId=String(b.fileId||'');
@@ -192,7 +192,14 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
           if(!rows.length)throw new HttpError(409,'Connect Google Drive first.');
           const tokens=await googleToken({client_id:process.env.GOOGLE_CLIENT_ID,client_secret:process.env.GOOGLE_CLIENT_SECRET,refresh_token:decryptGoogle(rows[0].refresh_cipher),grant_type:'refresh_token'});
           const response=await fetcher('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?fields=id,name,mimeType,webViewLink',{headers:{Authorization:'Bearer '+tokens.access_token},signal:AbortSignal.timeout(12000)});
-          if(!response.ok)throw new HttpError(403,'Google Drive does not allow access to this selected file.');
+          if(!response.ok){
+            const provider=await response.json().catch(()=>({}));
+            const reason=String(provider.error?.errors?.[0]?.reason||'unknown').replace(/[^a-zA-Z0-9_-]/g,'').slice(0,45);
+            console.error('Google Drive selected-file metadata status:',response.status,reason);
+            if(response.status===404)throw new HttpError(404,'Selected file is not authorized for this app. Confirm GOOGLE_PROJECT_NUMBER is the numeric Cloud project number, then reselect this individual video.');
+            if(response.status===403)throw new HttpError(403,'Google Drive denied access. Confirm the account and select a video owned by or shared with your connected Google account.');
+            throw new HttpError(502,'Google Drive file check failed (HTTP '+response.status+').');
+          }
           const file=await response.json();
           if(!String(file.mimeType||'').startsWith('video/'))throw new HttpError(400,'Select a video file.');
           return json(res,200,{file:{id:file.id,name:file.name,mimeType:file.mimeType},notice:'File selected and validated. Student access and playback are not enabled yet.'});
