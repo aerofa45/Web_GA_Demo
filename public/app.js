@@ -20,7 +20,7 @@ const initEntry=()=>({title:'',subtitle:'',description:'',url:'',image:'',video:
 
 const ui=(msg,error=false)=>{let x=document.createElement('div');x.className='flash'+(error?' error':'');x.textContent=msg;document.body.append(x);setTimeout(()=>x.remove(),3500)};
 
-function bar(publicMode=false){let root=publicMode?`/u/${encodeURIComponent(window.pageSlug||me?.slug||'')}`:'/';return `<header class="appbar"><a class="logo" href="/">forma<b>.</b>studio</a><nav class="nav"><a href="/">Studio</a>${me?`<a href="/app">Dashboard</a><a href="/u/${esc(me.slug)}">My portfolio</a>`:''}</nav><div class="actions">${me?`<span class="smalltxt" style="color:#9db5be">${esc(me.name)}</span><button class="btn small" id="logout">Log out</button>`:`<a class="btn small" href="/login">Log in</a><a class="btn small primary" href="/register">Get started</a>`}</div></header>`}
+function bar(publicMode=false){let root=publicMode?`/u/${encodeURIComponent(window.pageSlug||me?.slug||'')}`:'/';return `<header class="appbar"><a class="logo" href="/">forma<b>.</b>studio</a><nav class="nav"><a href="/">Studio</a>${me?`<a href="/app">Dashboard</a><a href="/course-studio">Course Studio</a><a href="/u/${esc(me.slug)}">My portfolio</a>`:''}</nav><div class="actions">${me?`<span class="smalltxt" style="color:#9db5be">${esc(me.name)}</span><button class="btn small" id="logout">Log out</button>`:`<a class="btn small" href="/login">Log in</a><a class="btn small primary" href="/register">Get started</a>`}</div></header>`}
 
 function wirebar(){let o=$('#logout');if(o)o.onclick=async()=>{await api('/api/logout','POST',{});me=null;profile=null;location.href='/'}}
 
