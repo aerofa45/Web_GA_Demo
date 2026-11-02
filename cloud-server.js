@@ -80,6 +80,20 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
     }
     return response.json();
   }
+  async function revokeCourseGrants(courseId,ownerId,keepFiles=[]){
+    const grants=await store.rest('forma_drive_video_grants','course_id='+eq(courseId)+'&select=course_id,email,file_id,permission_id');
+    const expired=grants.filter(g=>!keepFiles.includes(g.file_id));
+    if(!expired.length)return;
+    const linked=await store.rest('forma_google_connections','user_id='+eq(ownerId)+'&role=eq.instructor&select=refresh_cipher&limit=1');
+    if(!linked.length)throw new HttpError(409,'Reconnect Google Drive before removing shared videos.');
+    const tokens=await googleToken({client_id:process.env.GOOGLE_CLIENT_ID,client_secret:process.env.GOOGLE_CLIENT_SECRET,refresh_token:decryptGoogle(linked[0].refresh_cipher),grant_type:'refresh_token'});
+    for(const grant of expired){
+      const uri='https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(grant.file_id)+'/permissions/'+encodeURIComponent(grant.permission_id);
+      const response=await fetcher(uri,{method:'DELETE',headers:{Authorization:'Bearer '+tokens.access_token},signal:AbortSignal.timeout(15000)});
+      if(!response.ok&&response.status!==404)throw new HttpError(502,'Google Drive revocation failed. Course changes were not saved.');
+      await store.rest('forma_drive_video_grants','course_id='+eq(courseId)+'&email='+eq(grant.email)+'&file_id='+eq(grant.file_id),'DELETE');
+    }
+  }
   return async function handler(req,res){
     res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','strict-origin-when-cross-origin');
     res.setHeader('X-Frame-Options','DENY');
@@ -270,6 +284,8 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
             const metadata=await check.json();
             if(!String(metadata.mimeType||'').startsWith('video/'))throw new HttpError(400,'A selected Google Drive file is not a video.');
           }
+          const keep=(b.published??rows[0].published)?[...new Set(outline.chapters.flatMap(ch=>ch.lessons.map(l=>l.driveFile?.id).filter(Boolean)))]:[];
+          await revokeCourseGrants(courseMatch[1],user.id,keep);
           await store.rest('forma_course_drafts',`id=${eq(courseMatch[1])}&user_id=${eq(user.id)}`,'PATCH',{title,outline,...(b.published===undefined?{}:{published:b.published}),updated:Date.now()});
           return json(res,200,{ok:true});
         }
@@ -279,6 +295,7 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
           const rows=await store.rest('forma_course_drafts','id='+eq(courseId)+'&user_id='+eq(user.id)+'&select=id,outline&limit=1');
           if(!rows.length)throw new HttpError(404,'Course not found.');
           const outline={...rows[0].outline};if(method==='DELETE')outline.archived=true;else delete outline.archived;
+          if(method==='DELETE')await revokeCourseGrants(courseId,user.id,[]);
           await store.rest('forma_course_drafts','id='+eq(courseId)+'&user_id='+eq(user.id),'PATCH',{outline,published:false,updated:Date.now()});
           return json(res,200,{ok:true});
         }
