@@ -26,6 +26,7 @@
   }
   document.getElementById('content').append(panel);
  }
+ const lms=document.createElement('section');lms.id='lms-student';document.getElementById('content').append(lms);const lmsScript=document.createElement('script');lmsScript.src='/lms-student.js';lmsScript.defer=true;document.body.append(lmsScript);
  const root=document.getElementById('content'),text=(tag,value)=>{const node=document.createElement(tag);node.textContent=value;return node;};
  for(const c of data.course.outline.chapters){const section=document.createElement('section');section.append(text('h2',c.title));for(const l of c.lessons){const article=document.createElement('article');article.append(text('h3',l.title));if(l.type==='youtube'){
  const video=CourseTools.youtubeId(l.content);if(video){const frame=document.createElement('iframe');frame.src='https://www.youtube-nocookie.com/embed/'+video;frame.title=l.title;frame.loading='lazy';frame.allow='fullscreen; encrypted-media; picture-in-picture';frame.referrerPolicy='strict-origin-when-cross-origin';article.append(frame);}else article.append(text('p','Video URL unavailable.'));
