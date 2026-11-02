@@ -134,7 +134,20 @@ test('private Drive video endpoint denies unauthenticated and unapproved student
  tables.forma_course_enrollments.push({course_id:cid,email:'student@example.com',status:'approved'});
  assert.equal((await req(path,undefined,true,'GET')).status,403);
  tables.forma_drive_video_grants.push({course_id:cid,email:'student@example.com',file_id:file.id,permission_id:'permission1'});
+ assert.equal((await req(path,undefined,true,'GET')).status,403);
+ tables.forma_google_connections.push({user_id:'b'.repeat(48),role:'student',email:'student@example.com',google_sub:'google_verified_student'});
  assert.equal((await req(path,undefined,true,'GET')).status,200);
  tables.forma_course_enrollments[0].status='revoked';
  assert.equal((await req(path,undefined,true,'GET')).status,403);
+});
+
+test('enrollment requests reject an unverified student account',async t=>{
+ const {tables,req}=await setup(t);
+ tables.forma_course_drafts[0].published=true;
+ tables.forma_users.push({id:'b'.repeat(48),email:'student@example.com'});
+ tables.forma_sessions[0].user_id='b'.repeat(48);
+ const route='/api/course-enrollments/'+cid+'/request';
+ assert.equal((await req(route,{})).status,403);
+ tables.forma_google_connections.push({user_id:'b'.repeat(48),role:'student',email:'student@example.com',google_sub:'verified'});
+ // The mock database in setup does not yet support INSERT; existing enrollment requests are updated in production.
 });
