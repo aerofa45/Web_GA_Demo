@@ -65,7 +65,7 @@ Scope: the public program page, content studio view, and Alpine editor guide. Th
 | 4.1.2 Name/role/value | Native controls, pressed/expanded states and axe/tree evidence |
 | 4.1.3 Status messages | Polite `role=status` updates after submissions/transitions; tree inspection |
 
-## Remaining human verification
+## Remaining verification
 
 Run NVDA with Firefox or VoiceOver with Safari to listen to actual output for navigation, forms, errors, status announcements and details disclosures. Inspect real OS high-contrast settings and zoom at 400% on a 1280px-wide display. Check focus, borders and selected/hover states with a contrast tool. Include an editor/student with disabilities in a usability session if possible. Record browser/AT versions, tasks, findings and retests.
 
