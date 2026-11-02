@@ -16,7 +16,7 @@ const builder=new google.picker.PickerBuilder().addView(view).setOAuthToken(conf
 .setCallback(async event=>{
 if(event.action!==google.picker.Action.PICKED)return;
 const id=event.docs?.[0]?.id;if(!id)return;
-try{const data=await call('/api/google/selected-file',{method:'POST',body:JSON.stringify({fileId:id})});selected.textContent='Selected video: '+data.file.name+'. Student access is not enabled yet.';say('Google Drive selection verified.');}catch(e){say(e.message);}
+try{const data=await call('/api/google/selected-file',{method:'POST',body:JSON.stringify({fileId:id})});window.dispatchEvent(new CustomEvent('forma:drive-video-selected',{detail:data.file}));selected.textContent='Selected video: '+data.file.name+'. Click Save course to persist its lesson attachment. Student access is not enabled yet.';say('Google Drive video verified. Select a text lesson if needed, then Save course.');}catch(e){say(e.message);}
 });
 if(!config.appId)throw Error('GOOGLE_PROJECT_NUMBER is missing. Add the numeric Google Cloud project number in Render to authorize Picker selections with drive.file.');
 builder.setAppId(config.appId);
