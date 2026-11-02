@@ -121,6 +121,30 @@ function createApp(store,{origin='',production=false,trustProxy=false}={}){
           await store.rest('forma_messages','','POST',{id:id(),user_id:user.id,sender,email,message,created:Date.now()});return json(res,201,{ok:true});
         }
 
+        // Private PDF attachments: each file belongs to a course and an authenticated instructor.
+        if(p==='/api/course-pdf'&&method==='POST'){
+          const user=await auth(req);await rate(req,'pdf:'+user.id,20);
+          const b=await read(req),courseId=String(b.courseId||''),raw=String(b.data||'');
+          if(!/^[a-f0-9]{48}$/.test(courseId))throw new HttpError(400,'Select a course first.');
+          const owned=await store.rest('forma_course_drafts',`id=${eq(courseId)}&user_id=${eq(user.id)}&select=id&limit=1`);
+          if(!owned.length)throw new HttpError(404,'Course not found.');
+          if(!/^data:application\/pdf;base64,[A-Za-z0-9+/]+={0,2}$/.test(raw))throw new HttpError(400,'Upload a PDF file.');
+          const bytes=Buffer.from(raw.split(',')[1],'base64');
+          if(bytes.length<8||bytes.length>1800000||bytes.subarray(0,5).toString()!=='%PDF-')throw new HttpError(400,'PDF must be valid and under 1.8 MB.');
+          const fileId=id(),objectKey=user.id+'/'+courseId+'/'+fileId+'.pdf';
+          const response=await fetch(store.url+'/storage/v1/object/forma-course-pdfs/'+objectKey,{method:'POST',headers:{apikey:store.key,Authorization:'Bearer '+store.key,'Content-Type':'application/pdf','x-upsert':'false'},body:bytes,signal:AbortSignal.timeout(20000)});
+          if(!response.ok)throw new HttpError(503,'PDF storage failed. Ensure the private forma-course-pdfs bucket exists.');
+          await store.rest('forma_course_files','','POST',{id:fileId,course_id:courseId,user_id:user.id,object_key:objectKey,file_name:clean(b.name,160)||'Lecture.pdf',size_bytes:bytes.length,created:Date.now()});
+          return json(res,201,{file:{id:fileId,name:clean(b.name,160)||'Lecture.pdf',size:bytes.length}});
+        }
+        let pdfMatch=p.match(/^\/api\/course-pdf\/([a-f0-9]{48})$/);
+        if(pdfMatch&&method==='GET'){
+          const user=await auth(req),rows=await store.rest('forma_course_files',`id=${eq(pdfMatch[1])}&user_id=${eq(user.id)}&select=object_key,file_name&limit=1`);
+          if(!rows.length)throw new HttpError(404,'File not found.');
+          const r=await fetch(store.url+'/storage/v1/object/forma-course-pdfs/'+rows[0].object_key,{headers:{apikey:store.key,Authorization:'Bearer '+store.key},signal:AbortSignal.timeout(20000)});
+          if(!r.ok)throw new HttpError(503,'PDF unavailable.');
+          const bytes=Buffer.from(await r.arrayBuffer());res.writeHead(200,{'Content-Type':'application/pdf','Content-Disposition':'inline; filename="lesson.pdf"','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(bytes);
+        }
         // Staging course studio: owner-only drafts; no payment or private Drive playback.
         if(p==='/api/course-drafts'&&method==='GET'){
           const user=await auth(req);
@@ -147,7 +171,7 @@ function createApp(store,{origin='',production=false,trustProxy=false}={}){
           if(!title||!outline||!Array.isArray(outline.chapters)||outline.chapters.length>60)throw new HttpError(400,'Invalid course outline.');
           for(const ch of outline.chapters){
             if(typeof ch.title!=='string'||ch.title.length>180||!Array.isArray(ch.lessons)||ch.lessons.length>80)throw new HttpError(400,'Invalid chapter.');
-            for(const l of ch.lessons){if(typeof l.title!=='string'||l.title.length>180||typeof l.content!=='string'||l.content.length>20000||!['text','youtube','quiz'].includes(l.type))throw new HttpError(400,'Invalid lesson.');if(l.type==='youtube'&&l.content&&!/^https:\/\/(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/)[\w-]{11}(?:[&#?].*)?$/.test(l.content))throw new HttpError(400,'Use a standard YouTube video URL.');}
+            for(const l of ch.lessons){if(typeof l.title!=='string'||l.title.length>180||typeof l.content!=='string'||l.content.length>20000||!['text','youtube','quiz'].includes(l.type)|| (l.pdfId!==undefined&&!/^[a-f0-9]{48}$/.test(l.pdfId)))throw new HttpError(400,'Invalid lesson.');if(l.type==='youtube'&&l.content&&!/^https:\/\/(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/)[\w-]{11}(?:[&#?].*)?$/.test(l.content))throw new HttpError(400,'Use a standard YouTube video URL.');}
           }
           if(JSON.stringify(outline).length>240000)throw new HttpError(413,'Course too large.');
           await store.rest('forma_course_drafts',`id=${eq(courseMatch[1])}&user_id=${eq(user.id)}`,'PATCH',{title,outline,updated:Date.now()});
@@ -156,10 +180,20 @@ function createApp(store,{origin='',production=false,trustProxy=false}={}){
         if(p==='/api/course-generate'&&method==='POST'){
           const user=await auth(req);await rate(req,'gemini:'+user.id,8,3600000);
           const b=await read(req);const source=clean(b.source,16000),topic=clean(b.topic,180);
-          if(source.length<80)throw new HttpError(400,'Paste at least 80 characters of teaching notes.');
+          if(source.length<80&&!b.pdfId)throw new HttpError(400,'Paste at least 80 characters of notes or choose an attached PDF.');
           const apiKey=process.env.GEMINI_API_KEY;if(!apiKey)throw new HttpError(503,'Gemini is not configured.');
+          let pdfPart=null;
+          if(b.pdfId){
+            const files=await store.rest('forma_course_files',`id=${eq(String(b.pdfId))}&user_id=${eq(user.id)}&select=object_key,course_id&limit=1`);
+            if(!files.length||files[0].course_id!==String(b.courseId||''))throw new HttpError(404,'Course PDF not found.');
+            const download=await fetch(store.url+'/storage/v1/object/forma-course-pdfs/'+files[0].object_key,{headers:{apikey:store.key,Authorization:'Bearer '+store.key},signal:AbortSignal.timeout(20000)});
+            if(!download.ok)throw new HttpError(503,'Could not retrieve PDF.');
+            const data=Buffer.from(await download.arrayBuffer());
+            if(data.length>1800000)throw new HttpError(413,'PDF too large.');
+            pdfPart={inline_data:{mime_type:'application/pdf',data:data.toString('base64')}};
+          }
           const prompt='You are creating an editable educational course. Return ONLY JSON of shape {"chapters":[{"title":"...","lessons":[{"title":"...","type":"text","content":"..."},{"title":"...","type":"quiz","content":"Questions with answers"}]}]}. Create 2-5 concise chapters grounded only in supplied material. Never include markdown fences. Topic: '+topic+'\\nNotes: '+source;
-          const response=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':apiKey},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{responseMimeType:'application/json'}}),signal:AbortSignal.timeout(45000)});
+          const response=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':apiKey},body:JSON.stringify({contents:[{parts:[{text:prompt},...(pdfPart?[pdfPart]:[])]}],generationConfig:{responseMimeType:'application/json'}}),signal:AbortSignal.timeout(45000)});
           if(!response.ok)throw new HttpError(502,'Gemini request failed. Check API access and quota.');
           const data=await response.json();const raw=data.candidates?.[0]?.content?.parts?.map(x=>x.text||'').join('')||'';
           let outline;try{outline=JSON.parse(raw);}catch{throw new HttpError(502,'Gemini returned an invalid outline.');}
