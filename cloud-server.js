@@ -1,5 +1,6 @@
 'use strict';
 const http = require('node:http');
+const {validateOutline}=require('./course');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
@@ -28,7 +29,7 @@ function createStore(url,key,fetcher=fetch){
     removeImages:prefixes=>request('/storage/v1/object/forma-images',{method:'DELETE',body:JSON.stringify({prefixes}),headers:{'Content-Type':'application/json'}})};
 }
 
-function createApp(store,{origin='',production=false,trustProxy=false}={}){
+function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fetch,geminiKey=process.env.GEMINI_API_KEY}={}){
   const sessionName=production?'__Host-forma_session':'forma_session';
   const cookie=(token,age=TTL/1000)=>`${sessionName}=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${age}${production?'; Secure':''}`;
   const json=(res,status,value,headers={})=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...headers});res.end(JSON.stringify(value));};
@@ -132,7 +133,7 @@ function createApp(store,{origin='',production=false,trustProxy=false}={}){
           const bytes=Buffer.from(raw.split(',')[1],'base64');
           if(bytes.length<8||bytes.length>1800000||bytes.subarray(0,5).toString()!=='%PDF-')throw new HttpError(400,'PDF must be valid and under 1.8 MB.');
           const fileId=id(),objectKey=user.id+'/'+courseId+'/'+fileId+'.pdf';
-          const response=await fetch(store.url+'/storage/v1/object/forma-course-pdfs/'+objectKey,{method:'POST',headers:{apikey:store.key,Authorization:'Bearer '+store.key,'Content-Type':'application/pdf','x-upsert':'false'},body:bytes,signal:AbortSignal.timeout(20000)});
+          const response=await fetcher(store.url+'/storage/v1/object/forma-course-pdfs/'+objectKey,{method:'POST',headers:{apikey:store.key,Authorization:'Bearer '+store.key,'Content-Type':'application/pdf','x-upsert':'false'},body:bytes,signal:AbortSignal.timeout(20000)});
           if(!response.ok)throw new HttpError(503,'PDF storage failed. Ensure the private forma-course-pdfs bucket exists.');
           await store.rest('forma_course_files','','POST',{id:fileId,course_id:courseId,user_id:user.id,object_key:objectKey,file_name:clean(b.name,160)||'Lecture.pdf',size_bytes:bytes.length,created:Date.now()});
           return json(res,201,{file:{id:fileId,name:clean(b.name,160)||'Lecture.pdf',size:bytes.length}});
@@ -141,7 +142,7 @@ function createApp(store,{origin='',production=false,trustProxy=false}={}){
         if(pdfMatch&&method==='GET'){
           const user=await auth(req),rows=await store.rest('forma_course_files',`id=${eq(pdfMatch[1])}&user_id=${eq(user.id)}&select=object_key,file_name&limit=1`);
           if(!rows.length)throw new HttpError(404,'File not found.');
-          const r=await fetch(store.url+'/storage/v1/object/forma-course-pdfs/'+rows[0].object_key,{headers:{apikey:store.key,Authorization:'Bearer '+store.key},signal:AbortSignal.timeout(20000)});
+          const r=await fetcher(store.url+'/storage/v1/object/forma-course-pdfs/'+rows[0].object_key,{headers:{apikey:store.key,Authorization:'Bearer '+store.key},signal:AbortSignal.timeout(20000)});
           if(!r.ok)throw new HttpError(503,'PDF unavailable.');
           const bytes=Buffer.from(await r.arrayBuffer());res.writeHead(200,{'Content-Type':'application/pdf','Content-Disposition':'inline; filename="lesson.pdf"','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});return res.end(bytes);
         }
@@ -168,12 +169,12 @@ function createApp(store,{origin='',production=false,trustProxy=false}={}){
           const rows=await store.rest('forma_course_drafts',`id=${eq(courseMatch[1])}&user_id=${eq(user.id)}&select=id&limit=1`);
           if(!rows.length)throw new HttpError(404,'Course not found.');
           const b=await read(req),title=clean(b.title,140),outline=b.outline;
-          if(!title||!outline||!Array.isArray(outline.chapters)||outline.chapters.length>60)throw new HttpError(400,'Invalid course outline.');
-          for(const ch of outline.chapters){
-            if(typeof ch.title!=='string'||ch.title.length>180||!Array.isArray(ch.lessons)||ch.lessons.length>80)throw new HttpError(400,'Invalid chapter.');
-            for(const l of ch.lessons){if(typeof l.title!=='string'||l.title.length>180||typeof l.content!=='string'||l.content.length>20000||!['text','youtube','quiz'].includes(l.type)|| (l.pdfId!==undefined&&!/^[a-f0-9]{48}$/.test(l.pdfId)))throw new HttpError(400,'Invalid lesson.');if(l.type==='youtube'&&l.content&&!/^https:\/\/(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/)[\w-]{11}(?:[&#?].*)?$/.test(l.content))throw new HttpError(400,'Use a standard YouTube video URL.');}
+          if(!title)throw new HttpError(400,'Course title is required.');
+          try{validateOutline(outline);}catch{throw new HttpError(400,'Invalid course outline.');}
+          for(const pdfId of new Set(outline.chapters.flatMap(ch=>ch.lessons.map(l=>l.pdfId).filter(Boolean)))){
+            const files=await store.rest('forma_course_files','id='+eq(pdfId)+'&user_id='+eq(user.id)+'&course_id='+eq(courseMatch[1])+'&select=id&limit=1');
+            if(!files.length)throw new HttpError(400,'An attached PDF does not belong to this course.');
           }
-          if(JSON.stringify(outline).length>240000)throw new HttpError(413,'Course too large.');
           await store.rest('forma_course_drafts',`id=${eq(courseMatch[1])}&user_id=${eq(user.id)}`,'PATCH',{title,outline,updated:Date.now()});
           return json(res,200,{ok:true});
         }
@@ -181,20 +182,24 @@ function createApp(store,{origin='',production=false,trustProxy=false}={}){
           const user=await auth(req);
           const b=await read(req);const source=clean(b.source,16000),topic=clean(b.topic,180);
           if(source.length<80&&!b.pdfId)throw new HttpError(400,'Paste at least 80 characters of notes or choose an attached PDF.');
-          await rate(req,'gemini:'+user.id,20,3600000);
-          const apiKey=process.env.GEMINI_API_KEY;if(!apiKey)throw new HttpError(503,'Gemini is not configured.');
+          const apiKey=geminiKey;if(!apiKey)throw new HttpError(503,'Gemini is not configured.');
           let pdfPart=null;
           if(b.pdfId){
+            if(!/^[a-f0-9]{48}$/.test(String(b.pdfId))||!/^[a-f0-9]{48}$/.test(String(b.courseId)))throw new HttpError(400,'Select a valid course PDF.');
             const files=await store.rest('forma_course_files',`id=${eq(String(b.pdfId))}&user_id=${eq(user.id)}&select=object_key,course_id&limit=1`);
             if(!files.length||files[0].course_id!==String(b.courseId||''))throw new HttpError(404,'Course PDF not found.');
-            const download=await fetch(store.url+'/storage/v1/object/forma-course-pdfs/'+files[0].object_key,{headers:{apikey:store.key,Authorization:'Bearer '+store.key},signal:AbortSignal.timeout(20000)});
+            const download=await fetcher(store.url+'/storage/v1/object/forma-course-pdfs/'+files[0].object_key,{headers:{apikey:store.key,Authorization:'Bearer '+store.key},signal:AbortSignal.timeout(20000)});
             if(!download.ok)throw new HttpError(503,'Could not retrieve PDF.');
             const data=Buffer.from(await download.arrayBuffer());
+            if(data.length<8||data.subarray(0,5).toString()!=='%PDF-')throw new HttpError(400,'Stored file is not a valid PDF.');
             if(data.length>1800000)throw new HttpError(413,'PDF too large.');
             pdfPart={inline_data:{mime_type:'application/pdf',data:data.toString('base64')}};
           }
+          await rate(req,'gemini:'+user.id,20,3600000);
           const prompt='You are creating an editable educational course. Return ONLY JSON of shape {"chapters":[{"title":"...","lessons":[{"title":"...","type":"text","content":"..."},{"title":"...","type":"quiz","content":"Questions with answers"}]}]}. Create 2-5 concise chapters grounded only in supplied material. Never include markdown fences. Topic: '+topic+'\\nNotes: '+source;
-          const response=await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':apiKey},body:JSON.stringify({contents:[{parts:[{text:prompt},...(pdfPart?[pdfPart]:[])]}],generationConfig:{responseMimeType:'application/json'}}),signal:AbortSignal.timeout(45000)});
+          let response;
+          try{response=await fetcher('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':apiKey},body:JSON.stringify({contents:[{parts:[{text:prompt},...(pdfPart?[pdfPart]:[])]}],generationConfig:{responseMimeType:'application/json'}}),signal:AbortSignal.timeout(45000)});
+          }catch(e){const timeout=['TimeoutError','AbortError'].includes(e.name);throw new HttpError(timeout?504:502,timeout?'Gemini timed out. Please try again.':'Could not reach Gemini. Please try again.');}
           if(!response.ok){
             const errorBody=await response.json().catch(()=>({}));
             const providerCode=String(errorBody.error?.status||'');
@@ -205,9 +210,11 @@ function createApp(store,{origin='',production=false,trustProxy=false}={}){
             if(response.status===404)throw new HttpError(502,'Gemini model is not available for this API key.');
             throw new HttpError(502,'Gemini temporarily failed (HTTP '+response.status+').');
           }
-          const data=await response.json();const raw=data.candidates?.[0]?.content?.parts?.map(x=>x.text||'').join('')||'';
+          const data=await response.json().catch(()=>{throw new HttpError(502,'Gemini returned an invalid response.');});
+          if(data.promptFeedback?.blockReason||data.candidates?.[0]?.finishReason!=='STOP')throw new HttpError(502,'Gemini could not complete the outline. Try a smaller source or different material.');
+          const raw=data.candidates?.[0]?.content?.parts?.map(x=>x.text||'').join('')||'';
           let outline;try{outline=JSON.parse(raw);}catch{throw new HttpError(502,'Gemini returned an invalid outline.');}
-          if(!outline||!Array.isArray(outline.chapters)||outline.chapters.length>20)throw new HttpError(502,'Gemini returned an invalid outline.');
+          try{validateOutline(outline,{generated:true});}catch{throw new HttpError(502,'Gemini returned an invalid outline.');}
           return json(res,200,{outline});
         }
         if(/^\/api\/(public-courses\/|courses|earnings|withdrawals|admin|payment-connectors|stripe|esewa|course-video|media)/.test(p))throw new HttpError(403,'Payments, private lessons, withdrawals, and video uploads are disabled in this portfolio beta.');
