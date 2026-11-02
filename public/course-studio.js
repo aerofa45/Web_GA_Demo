@@ -1,6 +1,6 @@
 'use strict';
 const el=id=>document.getElementById(id);let active=null,outline={chapters:[]};
-const say=(msg)=>el('message').textContent=msg;
+const say=(msg)=>{el('message').textContent=msg;const status=el('generate-status');if(status)status.textContent=msg;};
 async function api(url,opts={}){const r=await fetch(url,{credentials:'same-origin',headers:{'Content-Type':'application/json'},...opts});let data=await r.json().catch(()=>({}));if(!r.ok)throw Error(data.error||data.message||'Request failed ('+r.status+')');return data;}
 function element(tag,value,callback){const x=document.createElement(tag);if(value!==undefined)x.textContent=value;if(callback)x.addEventListener('click',callback);return x;}
 async function list(){const d=await api('/api/course-drafts');el('courses').replaceChildren();for(const c of d.courses){const btn=element('button',c.title,()=>load(c.id));el('courses').append(btn);}}
@@ -9,5 +9,6 @@ function render(){const root=el('chapters');root.replaceChildren();outline.chapt
 el('create').addEventListener('click',async()=>{try{const d=await api('/api/course-drafts',{method:'POST',body:JSON.stringify({title:el('new-title').value})});await list();await load(d.course.id);}catch(e){say(e.message);}});
 el('add-chapter').addEventListener('click',()=>{outline.chapters.push({title:'New chapter',lessons:[]});render();});
 el('save').addEventListener('click',async()=>{try{if(!active)throw Error('Create a course first.');await api('/api/course-drafts/'+active,{method:'PUT',body:JSON.stringify({title:el('course-title').value,outline})});say('Course saved');await list();}catch(e){say(e.message);}});
-el('generate').addEventListener('click',async()=>{try{if(!active)throw Error('Create or select a course first.');say('Generating...');const pdfLesson=outline.chapters.flatMap(c=>c.lessons||[]).find(l=>l.pdfId);const d=await api('/api/course-generate',{method:'POST',body:JSON.stringify({source:el('source').value,topic:el('topic').value,pdfId:pdfLesson?.pdfId,courseId:active})});outline={chapters:[...outline.chapters,...d.outline.chapters]};render();say('Generated chapters added below your existing lessons and PDFs. Review, then Save course.');}catch(e){say(e.message);}});
+el('generate').addEventListener('click',async()=>{say('Generate clicked. Checking course and sending request...');try{if(!active)throw Error('Create or select a course first.');say('Generating...');const pdfLesson=outline.chapters.flatMap(c=>c.lessons||[]).find(l=>l.pdfId);const d=await api('/api/course-generate',{method:'POST',body:JSON.stringify({source:el('source').value,topic:el('topic').value,pdfId:pdfLesson?.pdfId,courseId:active})});outline={chapters:[...outline.chapters,...d.outline.chapters]};render();say('Generated chapters added below your existing lessons and PDFs. Review, then Save course.');}catch(e){say(e.message);}});
+window.addEventListener('error',e=>say('Page error: '+e.message));window.addEventListener('unhandledrejection',e=>say('Request error: '+(e.reason?.message||String(e.reason))));
 api('/api/me').then(d=>{if(!d.user)location.href='/login';else list().catch(e=>say(e.message));}).catch(e=>say(e.message));
