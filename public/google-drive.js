@@ -18,7 +18,8 @@ if(event.action!==google.picker.Action.PICKED)return;
 const id=event.docs?.[0]?.id;if(!id)return;
 try{const data=await call('/api/google/selected-file',{method:'POST',body:JSON.stringify({fileId:id})});selected.textContent='Selected video: '+data.file.name+'. Student access is not enabled yet.';say('Google Drive selection verified.');}catch(e){say(e.message);}
 });
-if(config.appId)builder.setAppId(config.appId);
+if(!config.appId)throw Error('GOOGLE_PROJECT_NUMBER is missing. Add the numeric Google Cloud project number in Render to authorize Picker selections with drive.file.');
+builder.setAppId(config.appId);
 builder.build().setVisible(true);
 say('Select one video from Google Drive.');
 }catch(e){say(e.message);}
