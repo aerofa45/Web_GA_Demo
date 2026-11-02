@@ -501,7 +501,16 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
             const assignments=await store.rest('forma_assignments','course_id='+eq(courseId)+'&select=id,title,max_points,weight');
             const gradebook=[];
             for(const a of assignments){const entries=await store.rest('forma_submissions','assignment_id='+eq(a.id)+(owner?'':'&student_id='+eq(user.id))+'&select=student_id,score,feedback,graded_at');gradebook.push(...entries.map(e=>({assignment:a.title,weight:a.weight,maxPoints:a.max_points,...e}))); }
-            return json(res,200,{grades:gradebook});
+            const totals={};
+            for(const g of gradebook){
+              if(g.score===null||g.score===undefined)continue;
+              const key=g.student_id;
+              const t=totals[key]||(totals[key]={earned:0,possibleWeight:0});
+              t.earned+=Number(g.score)/Number(g.maxPoints)*Number(g.weight);
+              t.possibleWeight+=Number(g.weight);
+            }
+            const weighted=Object.entries(totals).map(([studentId,t])=>({studentId,percent:t.possibleWeight?Math.round(t.earned/t.possibleWeight*10000)/100:null,gradedWeight:t.possibleWeight}));
+            return json(res,200,{grades:gradebook,weighted,notice:'Weighted percentages are provisional and exclude ungraded work.'});
           }
           throw new HttpError(405,'Unsupported LMS operation.');
         }
