@@ -118,12 +118,14 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
         if(!tokens.refresh_token||!tokens.access_token)throw new HttpError(400,'Google did not provide offline access. Disconnect this app in Google account permissions and reconnect.');
         const identity=await fetcher('https://openidconnect.googleapis.com/v1/userinfo',{headers:{Authorization:'Bearer '+tokens.access_token},signal:AbortSignal.timeout(12000)});
         if(!identity.ok)throw new HttpError(502,'Unable to verify Google account.');
-        const info=await identity.json();if(!info.sub||!info.email||info.email_verified===false)throw new HttpError(403,'A verified Google email is required.');
-        const record={user_id:user.id,role:'instructor',email:info.email,google_sub:info.sub,refresh_cipher:encryptGoogle(tokens.refresh_token),updated:Date.now()};
-        const existing=await store.rest('forma_google_connections',`user_id=${eq(user.id)}&role=eq.instructor&select=user_id&limit=1`);
-        if(existing.length)await store.rest('forma_google_connections',`user_id=${eq(user.id)}&role=eq.instructor`,'PATCH',record);
+        const info=await identity.json();if(!info.sub||!info.email||info.email_verified!==true)throw new HttpError(403,'A verified Google email is required.');
+        const role=rows[0].role==='student'?'student':'instructor';
+        if(role==='student'&&info.email.toLowerCase()!==user.email.toLowerCase())throw new HttpError(403,'Your Google email must match your Forma Studio account email.');
+        const record={user_id:user.id,role,email:info.email,google_sub:info.sub,refresh_cipher:encryptGoogle(tokens.refresh_token),updated:Date.now()};
+        const existing=await store.rest('forma_google_connections',`user_id=${eq(user.id)}&role=${eq(role)}&select=user_id&limit=1`);
+        if(existing.length)await store.rest('forma_google_connections',`user_id=${eq(user.id)}&role=${eq(role)}`,'PATCH',record);
         else await store.rest('forma_google_connections','','POST',record);
-        res.writeHead(303,{Location:'/course-studio?google=connected','Cache-Control':'no-store'});return res.end();
+        res.writeHead(303,{Location:role==='student'?'/course-studio?student_google=verified':'/course-studio?google=connected','Cache-Control':'no-store'});return res.end();
       }
       if(p.startsWith('/api/')){
         if(!['GET','HEAD'].includes(method)){
@@ -185,12 +187,17 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
           const rows=await store.rest('forma_google_connections',`user_id=${eq(user.id)}&role=eq.instructor&select=email&limit=1`);
           return json(res,200,{connected:rows.length>0,email:rows[0]?.email||null,pickerConfigured:Boolean(process.env.GOOGLE_PICKER_API_KEY),oauthConfigured:oauthReady()});
         }
+        if(p==='/api/google/student-status'&&method==='GET'){
+          const user=await auth(req);const verified=await store.rest('forma_google_connections',`user_id=${eq(user.id)}&role=eq.student&email=${eq(user.email.toLowerCase())}&select=google_sub&limit=1`);
+          return json(res,200,{verified:verified.length>0,email:user.email});
+        }
         if(p==='/api/google/connect'&&method==='GET'){
           const user=await auth(req);if(!oauthReady())throw new HttpError(503,'Google OAuth credentials are missing.');
+          const role=url.searchParams.get('role')==='student'?'student':'instructor';
           const state=id(),verifier=crypto.randomBytes(32).toString('base64url');
-          await store.rest('forma_google_oauth_states','','POST',{state,user_id:user.id,role:'instructor',verifier,created:Date.now()});
+          await store.rest('forma_google_oauth_states','','POST',{state,user_id:user.id,role,verifier,created:Date.now()});
           const challenge=crypto.createHash('sha256').update(verifier).digest('base64url');
-          const params=new URLSearchParams({client_id:process.env.GOOGLE_CLIENT_ID,redirect_uri:googleRedirect(),response_type:'code',scope:'openid email profile https://www.googleapis.com/auth/drive.file',access_type:'offline',prompt:'consent',code_challenge:challenge,code_challenge_method:'S256',state});
+          const params=new URLSearchParams({client_id:process.env.GOOGLE_CLIENT_ID,redirect_uri:googleRedirect(),response_type:'code',scope:role==='student'?'openid email profile':'openid email profile https://www.googleapis.com/auth/drive.file',access_type:'offline',prompt:'consent',code_challenge:challenge,code_challenge_method:'S256',state});
           return json(res,200,{authorizationUrl:'https://accounts.google.com/o/oauth2/v2/auth?'+params.toString()});
         }
         if(p==='/api/google/picker-config'&&method==='GET'){
@@ -319,6 +326,8 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
             return json(res,200,{status:own[0]?.status||'none'});
           }
           if(method==='POST'&&action==='request'){
+            const verified=await store.rest('forma_google_connections',`user_id=${eq(user.id)}&role=eq.student&email=${eq(user.email.toLowerCase())}&select=google_sub&limit=1`);
+            if(!verified.length)throw new HttpError(403,'Verify your matching Google email before requesting enrollment.');
             if(owner||!course.published)throw new HttpError(403,'This course is not accepting requests.');
             const email=user.email.toLowerCase();
             const existing=await store.rest('forma_course_enrollments','course_id='+eq(courseId)+'&email='+eq(email)+'&select=status&limit=1');
@@ -333,6 +342,12 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
             if(!/^\S+@\S+\.\S+$/.test(email)||!['approve','revoke'].includes(decision))throw new HttpError(400,'Invalid enrollment decision.');
             const enrolled=await store.rest('forma_course_enrollments','course_id='+eq(courseId)+'&email='+eq(email)+'&select=status&limit=1');
             if(!enrolled.length)throw new HttpError(404,'No enrollment request for this email.');
+            if(decision==='approve'){
+              const students=await store.rest('forma_users','email='+eq(email)+'&select=id&limit=1');
+              if(!students.length)throw new HttpError(403,'Student must register with this email first.');
+              const verified=await store.rest('forma_google_connections','user_id='+eq(students[0].id)+'&role=eq.student&email='+eq(email)+'&select=google_sub&limit=1');
+              if(!verified.length)throw new HttpError(403,'Student must verify this Google email before approval.');
+            }
             const connection=await store.rest('forma_google_connections','user_id='+eq(user.id)+'&role=eq.instructor&select=refresh_cipher&limit=1');
             const files=[...new Set(course.outline.chapters.flatMap(ch=>ch.lessons.map(l=>l.driveFile?.id).filter(Boolean)))];
             const prior=await store.rest('forma_drive_video_grants','course_id='+eq(courseId)+'&email='+eq(email)+'&select=file_id,permission_id');
@@ -385,6 +400,8 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
           if(!owner){
             if(!course.published)throw new HttpError(403,'Course is not available.');
             const approved=await store.rest('forma_course_enrollments','course_id='+eq(courseId)+'&email='+eq(user.email.toLowerCase())+'&status=eq.approved&select=email&limit=1');
+            const identity=await store.rest('forma_google_connections','user_id='+eq(user.id)+'&role=eq.student&email='+eq(user.email.toLowerCase())+'&select=google_sub&limit=1');
+            if(!identity.length)throw new HttpError(403,'Verify your Google identity to access this video.');
             const grant=await store.rest('forma_drive_video_grants','course_id='+eq(courseId)+'&email='+eq(user.email.toLowerCase())+'&file_id='+eq(file.id)+'&select=permission_id&limit=1');
             if(!approved.length||!grant.length)throw new HttpError(403,'Instructor approval is required for this video.');
           }
