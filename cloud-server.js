@@ -261,6 +261,15 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
             const files=await store.rest('forma_course_files','id='+eq(pdfId)+'&user_id='+eq(user.id)+'&course_id='+eq(courseMatch[1])+'&select=id&limit=1');
             if(!files.length)throw new HttpError(400,'An attached PDF does not belong to this course.');
           }
+          for(const drive of outline.chapters.flatMap(ch=>ch.lessons.map(l=>l.driveFile).filter(Boolean))){
+            const linked=await store.rest('forma_google_connections',`user_id=${eq(user.id)}&role=eq.instructor&select=refresh_cipher&limit=1`);
+            if(!linked.length)throw new HttpError(409,'Connect Google Drive before saving private video lessons.');
+            const tokens=await googleToken({client_id:process.env.GOOGLE_CLIENT_ID,client_secret:process.env.GOOGLE_CLIENT_SECRET,refresh_token:decryptGoogle(linked[0].refresh_cipher),grant_type:'refresh_token'});
+            const check=await fetcher('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(drive.id)+'?fields=id,name,mimeType',{headers:{Authorization:'Bearer '+tokens.access_token},signal:AbortSignal.timeout(12000)});
+            if(!check.ok)throw new HttpError(403,'A selected Google Drive video is no longer accessible.');
+            const metadata=await check.json();
+            if(!String(metadata.mimeType||'').startsWith('video/'))throw new HttpError(400,'A selected Google Drive file is not a video.');
+          }
           await store.rest('forma_course_drafts',`id=${eq(courseMatch[1])}&user_id=${eq(user.id)}`,'PATCH',{title,outline,...(b.published===undefined?{}:{published:b.published}),updated:Date.now()});
           return json(res,200,{ok:true});
         }
