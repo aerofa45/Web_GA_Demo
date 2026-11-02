@@ -1,0 +1,501 @@
+[
+  {
+    "state": "program",
+    "violations": [],
+    "incomplete": [
+      {
+        "id": "color-contrast",
+        "impact": "serious",
+        "tags": [
+          "cat.color",
+          "wcag2aa",
+          "wcag143",
+          "TTv5",
+          "TT13.c",
+          "EN-301-549",
+          "EN-9.1.4.3",
+          "ACT",
+          "RGAAv4",
+          "RGAA-3.2.1"
+        ],
+        "description": "Ensure the contrast between foreground and background colors meets WCAG 2 AA minimum contrast ratio thresholds",
+        "help": "Elements must meet minimum color contrast ratio thresholds",
+        "helpUrl": "https://dequeuniversity.com/rules/axe/4.14/color-contrast?application=playwright",
+        "nodes": [
+          {
+            "any": [
+              {
+                "id": "color-contrast",
+                "data": {
+                  "contrastRatio": 0,
+                  "fontSize": "8.4pt (11.2px)",
+                  "fontWeight": "bold",
+                  "messageKey": "bgGradient",
+                  "expectedContrastRatio": "4.5:1"
+                },
+                "relatedNodes": [
+                  {
+                    "html": "<section class=\"hero-v2\">",
+                    "target": [
+                      ".hero-v2"
+                    ]
+                  }
+                ],
+                "impact": "serious",
+                "message": "Element's background color could not be determined due to a background gradient"
+              }
+            ],
+            "all": [],
+            "none": [],
+            "impact": "serious",
+            "html": "<p class=\"eyebrow red\">SCHOOL OF CREATIVE POSSIBILITIES / DEMO</p>",
+            "target": [
+              ".hero-copy > .red.eyebrow"
+            ],
+            "failureSummary": "Fix any of the following:\n  Element's background color could not be determined due to a background gradient"
+          },
+          {
+            "any": [
+              {
+                "id": "color-contrast",
+                "data": {
+                  "contrastRatio": 0,
+                  "fontSize": "44.2pt (58.880001px)",
+                  "fontWeight": "bold",
+                  "messageKey": "bgGradient",
+                  "expectedContrastRatio": "3:1"
+                },
+                "relatedNodes": [
+                  {
+                    "html": "<section class=\"hero-v2\">",
+                    "target": [
+                      ".hero-v2"
+                    ]
+                  }
+                ],
+                "impact": "serious",
+                "message": "Element's background color could not be determined due to a background gradient"
+              }
+            ],
+            "all": [],
+            "none": [],
+            "impact": "serious",
+            "html": "<h1 tabindex=\"-1\">Your next chapter.<br><em>Make it meaningful.</em></h1>",
+            "target": [
+              "h1"
+            ],
+            "failureSummary": "Fix any of the following:\n  Element's background color could not be determined due to a background gradient"
+          },
+          {
+            "any": [
+              {
+                "id": "color-contrast",
+                "data": {
+                  "contrastRatio": 0,
+                  "fontSize": "44.2pt (58.880001px)",
+                  "fontWeight": "normal",
+                  "messageKey": "bgGradient",
+                  "expectedContrastRatio": "3:1"
+                },
+                "relatedNodes": [
+                  {
+                    "html": "<section class=\"hero-v2\">",
+                    "target": [
+                      ".hero-v2"
+                    ]
+                  }
+                ],
+                "impact": "serious",
+                "message": "Element's background color could not be determined due to a background gradient"
+              }
+            ],
+            "all": [],
+            "none": [],
+            "impact": "serious",
+            "html": "<em>Make it meaningful.</em>",
+            "target": [
+              "h1 > em"
+            ],
+            "failureSummary": "Fix any of the following:\n  Element's background color could not be determined due to a background gradient"
+          },
+          {
+            "any": [
+              {
+                "id": "color-contrast",
+                "data": {
+                  "contrastRatio": 0,
+                  "fontSize": "12.6pt (16.799999px)",
+                  "fontWeight": "normal",
+                  "messageKey": "bgGradient",
+                  "expectedContrastRatio": "4.5:1"
+                },
+                "relatedNodes": [
+                  {
+                    "html": "<section class=\"hero-v2\">",
+                    "target": [
+                      ".hero-v2"
+                    ]
+                  }
+                ],
+                "impact": "serious",
+                "message": "Element's background color could not be determined due to a background gradient"
+              }
+            ],
+            "all": [],
+            "none": [],
+            "impact": "serious",
+            "html": "<p class=\"lead\">Design thoughtfully. Build confidently. Create digital experiences that connect people to what matters.</p>",
+            "target": [
+              ".lead"
+            ],
+            "failureSummary": "Fix any of the following:\n  Element's background color could not be determined due to a background gradient"
+          },
+          {
+            "any": [
+              {
+                "id": "color-contrast",
+                "data": {
+                  "contrastRatio": 0,
+                  "fontSize": "10.2pt (13.6px)",
+                  "fontWeight": "normal",
+                  "messageKey": "bgGradient",
+                  "expectedContrastRatio": "4.5:1"
+                },
+                "relatedNodes": [
+                  {
+                    "html": "<section class=\"hero-v2\">",
+                    "target": [
+                      ".hero-v2"
+                    ]
+                  }
+                ],
+                "impact": "serious",
+                "message": "Element's background color could not be determined due to a background gradient"
+              }
+            ],
+            "all": [],
+            "none": [],
+            "impact": "serious",
+            "html": "<a href=\"#visit\">Plan a studio visit ↓</a>",
+            "target": [
+              "a[href$=\"#visit\"]"
+            ],
+            "failureSummary": "Fix any of the following:\n  Element's background color could not be determined due to a background gradient"
+          },
+          {
+            "any": [
+              {
+                "id": "color-contrast",
+                "data": {
+                  "contrastRatio": 0,
+                  "fontSize": "9.0pt (12px)",
+                  "fontWeight": "normal",
+                  "messageKey": "bgGradient",
+                  "expectedContrastRatio": "4.5:1"
+                },
+                "relatedNodes": [
+                  {
+                    "html": "<section class=\"hero-v2\">",
+                    "target": [
+                      ".hero-v2"
+                    ]
+                  }
+                ],
+                "impact": "serious",
+                "message": "Element's background color could not be determined due to a background gradient"
+              }
+            ],
+            "all": [],
+            "none": [],
+            "impact": "serious",
+            "html": "<div class=\"hero-note\"><span aria-hidden=\"true\">✦</span> Small teams. Big ideas. Work you can show.</div>",
+            "target": [
+              ".hero-note"
+            ],
+            "failureSummary": "Fix any of the following:\n  Element's background color could not be determined due to a background gradient"
+          },
+          {
+            "any": [
+              {
+                "id": "color-contrast",
+                "data": {
+                  "messageKey": "nonBmp"
+                },
+                "relatedNodes": [],
+                "impact": "serious",
+                "message": "Element content contains only non-text characters"
+              }
+            ],
+            "all": [],
+            "none": [],
+            "impact": "serious",
+            "html": "<span aria-hidden=\"true\">✦</span>",
+            "target": [
+              ".hero-note > span[aria-hidden=\"true\"]"
+            ],
+            "failureSummary": "Fix any of the following:\n  Element content contains only non-text characters"
+          },
+          {
+            "any": [
+              {
+                "id": "color-contrast",
+                "data": {
+                  "contrastRatio": 0,
+                  "fontSize": "7.2pt (9.6px)",
+                  "fontWeight": "normal",
+                  "messageKey": "bgGradient",
+                  "expectedContrastRatio": "4.5:1"
+                },
+                "relatedNodes": [
+                  {
+                    "html": "<section class=\"hero-v2\">",
+                    "target": [
+                      ".hero-v2"
+                    ]
+                  }
+                ],
+                "impact": "serious",
+                "message": "Element's background color could not be determined due to a background gradient"
+              }
+            ],
+            "all": [],
+            "none": [],
+            "impact": "serious",
+            "html": "<span>IDEAS COME TO LIFE HERE</span>",
+            "target": [
+              "figcaption > span:nth-child(1)"
+            ],
+            "failureSummary": "Fix any of the following:\n  Element's background color could not be determined due to a background gradient"
+          },
+          {
+            "any": [
+              {
+                "id": "color-contrast",
+                "data": {
+                  "contrastRatio": 0,
+                  "fontSize": "7.2pt (9.6px)",
+                  "fontWeight": "normal",
+                  "messageKey": "bgGradient",
+                  "expectedContrastRatio": "4.5:1"
+                },
+                "relatedNodes": [
+                  {
+                    "html": "<section class=\"hero-v2\">",
+                    "target": [
+                      ".hero-v2"
+                    ]
+                  }
+                ],
+                "impact": "serious",
+                "message": "Element's background color could not be determined due to a background gradient"
+              }
+            ],
+            "all": [],
+            "none": [],
+            "impact": "serious",
+            "html": "<span>AI-generated concept image</span>",
+            "target": [
+              "figcaption > span:nth-child(2)"
+            ],
+            "failureSummary": "Fix any of the following:\n  Element's background color could not be determined due to a background gradient"
+          }
+        ]
+      }
+    ],
+    "passes": [
+      {
+        "id": "aria-allowed-attr",
+        "description": "Ensure an element's role supports its ARIA attributes"
+      },
+      {
+        "id": "aria-conditional-attr",
+        "description": "Ensure ARIA attributes are used as described in the specification of the element's role"
+      },
+      {
+        "id": "aria-deprecated-role",
+        "description": "Ensure elements do not use deprecated roles"
+      },
+      {
+        "id": "aria-hidden-body",
+        "description": "Ensure aria-hidden=\"true\" is not present on the document body."
+      },
+      {
+        "id": "aria-hidden-focus",
+        "description": "Ensure aria-hidden elements are not focusable nor contain focusable elements"
+      },
+      {
+        "id": "aria-prohibited-attr",
+        "description": "Ensure ARIA attributes are not prohibited for an element's role"
+      },
+      {
+        "id": "aria-required-attr",
+        "description": "Ensure elements with ARIA roles have all required ARIA attributes"
+      },
+      {
+        "id": "aria-roles",
+        "description": "Ensure all elements with a role attribute use a valid value"
+      },
+      {
+        "id": "aria-valid-attr-value",
+        "description": "Ensure all ARIA attributes have valid values"
+      },
+      {
+        "id": "aria-valid-attr",
+        "description": "Ensure attributes that begin with aria- are valid ARIA attributes"
+      },
+      {
+        "id": "button-name",
+        "description": "Ensure buttons have discernible text"
+      },
+      {
+        "id": "bypass",
+        "description": "Ensure each page has at least one mechanism for a user to bypass navigation and jump straight to the content"
+      },
+      {
+        "id": "color-contrast",
+        "description": "Ensure the contrast between foreground and background colors meets WCAG 2 AA minimum contrast ratio thresholds"
+      },
+      {
+        "id": "definition-list",
+        "description": "Ensure <dl> elements are structured correctly"
+      },
+      {
+        "id": "dlitem",
+        "description": "Ensure <dt> and <dd> elements are contained by a <dl>"
+      },
+      {
+        "id": "document-title",
+        "description": "Ensure each HTML document contains a non-empty <title> element"
+      },
+      {
+        "id": "html-has-lang",
+        "description": "Ensure every HTML document has a lang attribute"
+      },
+      {
+        "id": "html-lang-valid",
+        "description": "Ensure the lang attribute of the <html> element has a valid value"
+      },
+      {
+        "id": "image-alt",
+        "description": "Ensure <img> elements have alternative text or a role of none or presentation"
+      },
+      {
+        "id": "link-name",
+        "description": "Ensure links have discernible text"
+      },
+      {
+        "id": "list",
+        "description": "Ensure that lists are structured correctly"
+      },
+      {
+        "id": "listitem",
+        "description": "Ensure <li> elements are used semantically"
+      },
+      {
+        "id": "meta-viewport",
+        "description": "Ensure <meta name=\"viewport\"> does not disable text scaling and zooming"
+      },
+      {
+        "id": "nested-interactive",
+        "description": "Ensure interactive controls are not nested as they are not always announced by screen readers or can cause focus problems for assistive technologies"
+      }
+    ],
+    "tree": "- link \"Skip to main content\":\n  - /url: \"#main\"\n- text: INDEPENDENT PORTFOLIO CONCEPT Fictional program & generated imagery · No SEMO affiliation\n- banner:\n  - link \"CAMPUS WEB STUDIO\":\n    - /url: /\n  - navigation \"Main navigation\":\n    - button \"Explore the program\" [pressed]\n    - button \"Content studio\"\n    - link \"Editor guide ↗\":\n      - /url: /alpine.html\n- main:\n  - paragraph: SCHOOL OF CREATIVE POSSIBILITIES / DEMO\n  - heading \"Your next chapter. Make it meaningful.\" [level=1]:\n    - text: Your next chapter.\n    - emphasis: Make it meaningful.\n  - paragraph: Design thoughtfully. Build confidently. Create digital experiences that connect people to what matters.\n  - link \"Find your creative direction ↗\":\n    - /url: \"#program-details\"\n  - link \"Plan a studio visit ↓\":\n    - /url: \"#visit\"\n  - text: Small teams. Big ideas. Work you can show.\n  - figure \"IDEAS COME TO LIFE HERE AI-generated concept image\":\n    - img \"Generated concept scene of adult students collaborating at a laptop in a sunlit design studio.\"\n    - text: IDEAS COME TO LIFE HERE AI-generated concept image\n  - text: YOUR PATH\n  - strong: Digital Media\n  - text: YOUR APPROACH\n  - strong: Learn by making\n  - text: YOUR NEXT STEP\n  - strong: A portfolio with purpose\n  - paragraph: CURIOUS MINDS. PRACTICAL SKILLS.\n  - heading \"More than a classroom. A place to find your craft.\" [level=2]\n  - paragraph: Move from your first sketch to a working experience. Explore three connected areas of our fictional program.\n  - article:\n    - text: 01 / YOUR CREATIVE TOOLKIT\n    - heading \"Experience design\" [level=3]\n    - paragraph: Start with people. Turn interviews, sketches, and prototypes into clear, useful interfaces.\n  - article:\n    - text: 02 / YOUR CREATIVE TOOLKIT\n    - heading \"Creative development\" [level=3]\n    - paragraph: Bring the details to life with responsive websites, accessible components, and thoughtful interaction.\n  - article:\n    - text: 03 / YOUR CREATIVE TOOLKIT\n    - heading \"Studio practice\" [level=3]\n    - paragraph: Collaborate, critique, and refine. Build a project that tells the story of how you solve problems.\n  - paragraph: A SMALL STEP TOWARD WHAT'S NEXT\n  - heading \"Picture yourself in the studio.\" [level=2]:\n    - text: Picture yourself\n    - emphasis: in the studio.\n  - paragraph: Meet the ideas, spaces, and people behind the work. These sample details can be updated through the Content studio.\n  - link \"Visit the real SEMO website ↗\":\n    - /url: https://semo.edu/\n  - paragraph: PROGRAM INFORMATION / LOCAL DEMO\n  - term: Application deadline\n  - definition: July 1, 2027\n  - term: Advising contact\n  - definition: Digital Media advising team\n  - term: Studio visit schedule\n  - definition: Fridays at 10 a.m.\n  - paragraph: Fictional details for this portfolio. Not admissions advice.\n  - paragraph: THE WORK BEHIND THE WEBSITE\n  - heading \"A deadline changes. The website should, too.\" [level=2]\n  - paragraph: Admissions extends an application deadline. See how a web assistant checks the request, routes it for approval, and updates this page without changing code.\n  - button \"Try the real-world scenario →\"\n  - list:\n    - listitem:\n      - text: \"01\"\n      - strong: Receive the request\n      - paragraph: A department submits the correct content.\n    - listitem:\n      - text: \"02\"\n      - strong: Review & approve\n      - paragraph: Compare the current and proposed wording.\n    - listitem:\n      - text: \"03\"\n      - strong: Publish & verify\n      - paragraph: See the approved update on this local demo page.\n  - status\n- contentinfo:\n  - text: CAMPUS WEB STUDIO\n  - paragraph: An independent university web portfolio. Built with purpose. Designed for people.\n  - link \"Editor publishing guide ↗\":\n    - /url: /alpine.html\n  - paragraph: Fictional content · AI-generated concept imagery No SEMO affiliation or live CMS integration"
+  },
+  {
+    "state": "studio",
+    "violations": [],
+    "incomplete": [],
+    "passes": [
+      {
+        "id": "aria-allowed-attr",
+        "description": "Ensure an element's role supports its ARIA attributes"
+      },
+      {
+        "id": "aria-conditional-attr",
+        "description": "Ensure ARIA attributes are used as described in the specification of the element's role"
+      },
+      {
+        "id": "aria-deprecated-role",
+        "description": "Ensure elements do not use deprecated roles"
+      },
+      {
+        "id": "aria-hidden-body",
+        "description": "Ensure aria-hidden=\"true\" is not present on the document body."
+      },
+      {
+        "id": "aria-hidden-focus",
+        "description": "Ensure aria-hidden elements are not focusable nor contain focusable elements"
+      },
+      {
+        "id": "aria-prohibited-attr",
+        "description": "Ensure ARIA attributes are not prohibited for an element's role"
+      },
+      {
+        "id": "aria-required-attr",
+        "description": "Ensure elements with ARIA roles have all required ARIA attributes"
+      },
+      {
+        "id": "aria-roles",
+        "description": "Ensure all elements with a role attribute use a valid value"
+      },
+      {
+        "id": "aria-valid-attr-value",
+        "description": "Ensure all ARIA attributes have valid values"
+      },
+      {
+        "id": "aria-valid-attr",
+        "description": "Ensure attributes that begin with aria- are valid ARIA attributes"
+      },
+      {
+        "id": "button-name",
+        "description": "Ensure buttons have discernible text"
+      },
+      {
+        "id": "bypass",
+        "description": "Ensure each page has at least one mechanism for a user to bypass navigation and jump straight to the content"
+      },
+      {
+        "id": "color-contrast",
+        "description": "Ensure the contrast between foreground and background colors meets WCAG 2 AA minimum contrast ratio thresholds"
+      },
+      {
+        "id": "document-title",
+        "description": "Ensure each HTML document contains a non-empty <title> element"
+      },
+      {
+        "id": "form-field-multiple-labels",
+        "description": "Ensure form field does not have multiple label elements"
+      },
+      {
+        "id": "html-has-lang",
+        "description": "Ensure every HTML document has a lang attribute"
+      },
+      {
+        "id": "html-lang-valid",
+        "description": "Ensure the lang attribute of the <html> element has a valid value"
+      },
+      {
+        "id": "label",
+        "description": "Ensure every form element has a label"
+      },
+      {
+        "id": "link-name",
+        "description": "Ensure links have discernible text"
+      },
+      {
+        "id": "meta-viewport",
+        "description": "Ensure <meta name=\"viewport\"> does not disable text scaling and zooming"
+      },
+      {
+        "id": "nested-interactive",
+        "description": "Ensure interactive controls are not nested as they are not always announced by screen readers or can cause focus problems for assistive technologies"
+      },
+      {
+        "id": "select-name",
+        "description": "Ensure select element has an accessible name"
+      }
+    ],
+    "tree": "- link \"Skip to main content\":\n  - /url: \"#main\"\n- text: INDEPENDENT PORTFOLIO CONCEPT Fictional program & generated imagery · No SEMO affiliation\n- banner:\n  - link \"CAMPUS WEB STUDIO\":\n    - /url: /\n  - navigation \"Main navigation\":\n    - button \"Explore the program\"\n    - button \"Content studio\" [pressed]\n    - link \"Editor guide ↗\":\n      - /url: /alpine.html\n- main:\n  - paragraph: CAMPUS OPERATIONS / EDITOR WORKSPACE\n  - heading \"Content studio\" [level=1]\n  - paragraph: Good content takes a team. Turn a department request into a reviewed page update.\n  - text: ● Local demo\n  - strong: \"Start here: Admissions extended a deadline.\"\n  - paragraph: Open “Update application deadline” below. Compare the text, send it through review, approve it, then publish. Choose “View updated program” to see the result.\n  - paragraph: Publishing updates this browser’s demo page. No Cascade connection, authenticated roles, or external publication.\n  - text: Draft\n  - strong: \"01\"\n  - text: In review\n  - strong: \"01\"\n  - text: Approved\n  - strong: \"00\"\n  - text: Published\n  - strong: \"01\"\n  - heading \"Edit queue\" [level=2]\n  - text: Status\n  - combobox \"Status\":\n    - option \"All\" [selected]\n    - option \"Draft\"\n    - option \"In review\"\n    - option \"Approved\"\n    - option \"Published\"\n  - article:\n    - text: WEB-104 · Admissions Draft\n    - heading \"Update application deadline\" [level=3]\n    - paragraph: Admissions approved an extension. Update the program information before the recruitment event.\n    - paragraph:\n      - strong: Application deadline\n    - text: BEFORE\n    - paragraph: July 1, 2027\n    - text: PROPOSED UPDATE\n    - paragraph: August 15, 2027\n    - button \"Move to In review\"\n  - article:\n    - text: WEB-105 · Academic Affairs In review\n    - heading \"Repair program contact link\" [level=3]\n    - paragraph: Confirm the department email before publishing.\n    - paragraph: Tracking-only sample ticket; no page field is attached.\n    - button \"Request changes\"\n    - button \"Move to Approved\"\n  - article:\n    - text: WEB-106 · Marketing Published\n    - heading \"Add meaningful image alt text\" [level=3]\n    - paragraph: Describe the scene without repeating the caption.\n    - paragraph: Tracking-only sample ticket; no page field is attached.\n  - complementary:\n    - paragraph: DEPARTMENT REQUEST\n    - heading \"Make a page better.\" [level=2]\n    - text: Ticket title\n    - textbox \"Ticket title\":\n      - /placeholder: e.g. Update studio visit hours\n    - text: Department\n    - combobox \"Department\":\n      - option \"Admissions\" [selected]\n      - option \"Marketing\"\n      - option \"Academic Affairs\"\n    - text: Page field\n    - combobox \"Page field\":\n      - option \"Application deadline\" [selected]\n      - option \"Advising contact\"\n      - option \"Studio visit schedule\"\n    - text: Replacement text\n    - textbox \"Replacement text\":\n      - /placeholder: e.g. Saturdays at 11 a.m.\n    - text: Requested change\n    - textbox \"Requested change\":\n      - /placeholder: What changed, and who confirmed it?\n    - button \"Create draft →\"\n    - paragraph: Fictional information only. Changes are saved in this browser.\n    - button \"Reset demo tickets\"\n  - status\n- contentinfo:\n  - text: CAMPUS WEB STUDIO\n  - paragraph: An independent university web portfolio. Built with purpose. Designed for people.\n  - link \"Editor publishing guide ↗\":\n    - /url: /alpine.html\n  - paragraph: Fictional content · AI-generated concept imagery No SEMO affiliation or live CMS integration"
+  }
+]

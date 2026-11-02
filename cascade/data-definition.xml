@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<system-data-structure><text identifier="title" label="Program title" required="true"/><text identifier="intro" label="Introduction" required="true" multi-line="true"/><group identifier="feature" label="Feature" multiple="true"><text identifier="title" label="Feature title" required="true"/></group></system-data-structure>

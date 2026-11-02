@@ -1,0 +1,17 @@
+{
+  "url": "http://127.0.0.1:4195/",
+  "fetchTime": "2026-11-02T03:40:32.199Z",
+  "scores": {
+    "performance": 89,
+    "accessibility": 100,
+    "best-practices": 100,
+    "seo": 100
+  },
+  "metrics": {
+    "first-contentful-paint": "1.5 s",
+    "largest-contentful-paint": "2.1 s",
+    "cumulative-layout-shift": "0",
+    "total-blocking-time": "390 ms"
+  },
+  "note": "Single local Lighthouse mobile lab run; not field Core Web Vitals or WCAG certification."
+}

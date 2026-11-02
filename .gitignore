@@ -1,0 +1,10 @@
+node_modules/
+dist/
+test-results/
+playwright-report/
+*.local
+work/
+
+originals/
+evidence/lighthouse.html
+evidence/lighthouse.json
