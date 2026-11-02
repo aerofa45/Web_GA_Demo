@@ -5,7 +5,7 @@ const {validateOutline}=require('../course');
 const uid='a'.repeat(48),cid='c'.repeat(48),pid='d'.repeat(48),token='e'.repeat(48);
 const valid=()=>({chapters:[{title:'Chapter',lessons:[{title:'Lesson',type:'text',content:'Explanation'}]}]});
 async function setup(t,options={}){
- const tables={forma_sessions:[{tokenhash:crypto.createHash('sha256').update(token).digest('hex'),expires:Date.now()+60000,user_id:uid}],forma_users:[{id:uid}],forma_course_drafts:[{id:cid,user_id:uid,title:'Original',outline:valid()}],forma_course_files:[{id:pid,user_id:uid,course_id:cid,object_key:'private.pdf'}]};
+ const tables={forma_sessions:[{tokenhash:crypto.createHash('sha256').update(token).digest('hex'),expires:Date.now()+60000,user_id:uid}],forma_users:[{id:uid,email:'teacher@example.com'}],forma_course_drafts:[{id:cid,user_id:uid,title:'Original',outline:valid()}],forma_course_files:[{id:pid,user_id:uid,course_id:cid,object_key:'private.pdf'}],forma_course_enrollments:[],forma_drive_video_grants:[],forma_google_connections:[]};
  const state={calls:[],rates:0,reply:()=>new Response(JSON.stringify({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(valid())}]}}]})),pdf:Buffer.from('%PDF-1.4 fixture')};
  const store={url:'https://example.supabase.co',key:'fixture',async rpc(){state.rates++;return true;},async rest(table,query='',method='GET',body){const q=new URLSearchParams(query);const matches=r=>[...q].every(([k,v])=>['select','limit','order'].includes(k)||v.startsWith('eq.')&&String(r[k])===decodeURIComponent(v.slice(3))||v.startsWith('gt.')&&r[k]>Number(v.slice(3)));const rows=tables[table].filter(matches);if(method==='PATCH'){rows.forEach(r=>Object.assign(r,structuredClone(body)));return null;}return structuredClone(rows).map(row=>q.has('select')&&q.get('select')!=='*'?Object.fromEntries(q.get('select').split(',').map(k=>[k,row[k]])):row);}};
  const server=http.createServer(createApp(store,{geminiKey:'fake-test-key',...options,fetcher:async(url,options)=>{state.calls.push({url,options});return url.includes('googleapis')?state.reply():new Response(state.pdf);}}));
@@ -119,4 +119,22 @@ test('Drive lesson attachments validate and never appear in public course respon
  assert.equal(publicView.body.course.outline.chapters[0].lessons[0].driveFile,undefined);
  const ownerView=await req('/api/course-drafts/'+cid,undefined,true,'GET');
  assert.deepEqual(ownerView.body.course.outline.chapters[0].lessons[0].driveFile,file);
+});
+
+test('private Drive video endpoint denies unauthenticated and unapproved students',async t=>{
+ const {tables,req}=await setup(t),file={id:'courseVideo0123456',name:'Private.mp4',mimeType:'video/mp4'};
+ tables.forma_course_drafts[0].outline.chapters[0].lessons[0].driveFile=file;
+ tables.forma_course_drafts[0].published=true;
+ const path='/api/course-video/'+cid+'/0/0';
+ assert.equal((await req(path,undefined,false,'GET')).status,401);
+ assert.equal((await req(path,undefined,true,'GET')).status,200);
+ tables.forma_users.push({id:'b'.repeat(48),email:'student@example.com'});
+ tables.forma_sessions[0].user_id='b'.repeat(48);
+ assert.equal((await req(path,undefined,true,'GET')).status,403);
+ tables.forma_course_enrollments.push({course_id:cid,email:'student@example.com',status:'approved'});
+ assert.equal((await req(path,undefined,true,'GET')).status,403);
+ tables.forma_drive_video_grants.push({course_id:cid,email:'student@example.com',file_id:file.id,permission_id:'permission1'});
+ assert.equal((await req(path,undefined,true,'GET')).status,200);
+ tables.forma_course_enrollments[0].status='revoked';
+ assert.equal((await req(path,undefined,true,'GET')).status,403);
 });
