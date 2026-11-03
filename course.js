@@ -5,6 +5,7 @@ const {youtubeId}=require('./public/course-tools');
 function validateOutline(outline,{generated=false}={}) {
   const invalid=()=>{throw Error('Invalid course outline.');};
   if(!outline||!Array.isArray(outline.chapters)||outline.chapters.length>(generated?20:60)||(generated&&!outline.chapters.length))invalid();
+  if(outline.theme!==undefined&&(generated||!['midnight','daylight','forest'].includes(outline.theme)))invalid();
   for(const ch of outline.chapters){
     if(!ch||typeof ch.title!=='string'||!ch.title.trim()||ch.title.length>180||!Array.isArray(ch.lessons)||ch.lessons.length>80||(generated&&!ch.lessons.length))invalid();
     for(const l of ch.lessons){
