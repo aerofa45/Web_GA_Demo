@@ -1,10 +1,16 @@
-# Forma Studio — portfolio builder beta
+# Forma Studio — Portfolio CMS and LMS Builder
 
-Live beta: https://forma-studio-69of.onrender.com
+Live staging demo: [https://web-ga-demo.onrender.com/](https://web-ga-demo.onrender.com/)
 
-Hosted using the dedicated Forma_Trial Supabase project. Nine automated backend tests and the initial live API checks passed. A production security audit and full manual accessibility review have not been performed.
+This README describes the **forma-studio-test** branch and its staging deployment, backed by the dedicated **Forma_Trial_Test** Supabase project. A production security audit and full manual accessibility review have not been performed.
 
-Forma lets students, researchers, and creators publish a personal portfolio and maintain it without editing code. It supports account registration, sign-in, live editing, custom pages, public portfolios, optimized image uploads, and a private contact inbox.
+Forma Studio is a custom **content management system (CMS) and learning management system (LMS) builder** for students, researchers, creators, and instructors. Its portfolio CMS supports account registration, sign-in, visual content editing, custom pages, public publishing, optimized image uploads, and a private contact inbox. Its course-authoring and LMS features include structured chapters and lessons, assignments, quizzes, enrollment approval, grading, and student progress. These demonstrate website-builder and learning-management workflows; Forma is an independent project, not an integration with Cascade CMS, Wix, or another commercial builder.
+
+The test branch also includes preview-and-confirm content editing, version history, Gemini-assisted course and assessment generation, Google OAuth/Drive integration code, an OAuth-protected MCP connector, and **Stripe sandbox** payment/refund handling. These are staging features, not a claim of production readiness or complete provider-level verification. See [the staging QA report](docs/STAGING-QA-2026-11-02.md) and [connector documentation](CONNECT-CHATGPT.md) for current evidence and remaining limitations.
+
+## Original portfolio-beta reference
+
+The original portfolio-beta setup, architecture, and operating notes below are retained for reference. Their references to the `forma-studio` branch, the `Forma_Trial` project, the original test scope, and disabled course/payment features describe the earlier beta. Use the staging link and documentation above for this `forma-studio-test` version.
 
 This application lives on **forma-studio** in aerofa45/Web_GA_Demo. The SEMO Campus Web Studio remains on **main**. Keep their hosting separate; do not merge these application roots.
 
