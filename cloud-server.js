@@ -307,6 +307,45 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
           const ownedCourses=instructor?await store.rest('forma_course_drafts','user_id='+eq(user.id)+'&select=id,title,published,outline,updated&limit=100'):[];
           return json(res,200,{role:instructor?'instructor':'student',admin:false,portfolio:{url:'/u/'+user.slug,sections:['experience','education','research','projects','publications']},courses:ownedCourses.filter(c=>!c.outline?.archived).map(c=>({id:c.id,title:c.title,published:c.published,updated:c.updated})),supportedCourseActions:['rename-course','add-chapter','rename-chapter','add-lesson','edit-lesson','remove-lesson'],note:'All edits require separate preview and explicit confirmation.'});
         }
+        // A generated outline remains a preview until the instructor explicitly confirms.
+        // The existing atomic assistant RPC protects against stale edits and records an undo snapshot.
+        if(p==='/api/assistant/course-generation/commit'&&method==='POST'){
+          const user=await auth(req);await requireInstructor(user);await rate(req,'generated-course-save:'+user.id,30);
+          const b=await read(req),courseId=String(b.courseId||''),expected=b.expectedUpdated;
+          if(!/^[a-f0-9]{48}$/.test(courseId)||!Number.isSafeInteger(expected))throw new HttpError(400,'Select a valid course and preview version.');
+          const rows=await store.rest('forma_course_drafts','id='+eq(courseId)+'&user_id='+eq(user.id)+'&select=id,title,outline,published,updated&limit=1');
+          const course=rows[0];if(!course||course.outline?.archived)throw new HttpError(404,'Course not found.');
+          const title=clean(b.title,140)||course.title,outline=b.outline;
+          try{validateOutline(outline);}catch{throw new HttpError(400,'Generated course outline is invalid.');}
+          if(!outline.chapters.length||JSON.stringify(outline).length>240000)throw new HttpError(400,'Generate at least one chapter within size limits.');
+          if(expected!==Number(course.updated))throw new HttpError(409,'Course changed after generation. Preview and generate again.');
+          // Never change publishing status or stored file metadata.
+          const result=await store.rpc('forma_assistant_commit',{p_user_id:user.id,p_domain:'course',p_resource_id:courseId,p_expected_updated:expected,p_content:{title,outline},p_operation:'approve-generated-course',p_version_id:id(),p_audit_id:id(),p_now:Date.now()});
+          if(!result?.saved)throw new HttpError(409,'Course changed while saving. Reload before retrying.');
+          return json(res,200,{saved:true,courseId,versionId:result.versionId,url:'/course/'+courseId});
+        }
+        // Restore a previously captured version through the same ownership-scoped atomic writer.
+        if(p==='/api/assistant/restore'&&method==='POST'){
+          const user=await auth(req);await rate(req,'assistant-restore:'+user.id,30);
+          const b=await read(req),versionId=String(b.versionId||''),expected=b.expectedUpdated;
+          if(!/^[a-f0-9]{48}$/.test(versionId)||!Number.isSafeInteger(expected)||b.confirm!==true)throw new HttpError(400,'Select a version and explicitly confirm restoration.');
+          const versions=await store.rest('forma_assistant_versions','id='+eq(versionId)+'&user_id='+eq(user.id)+'&select=id,domain,resource_id,previous&limit=1');
+          const version=versions[0];if(!version||!['course','portfolio'].includes(version.domain))throw new HttpError(404,'Version not found.');
+          if(version.domain==='course')await requireInstructor(user);
+          const currentRows=version.domain==='course'?await store.rest('forma_course_drafts','id='+eq(version.resource_id)+'&user_id='+eq(user.id)+'&select=title,outline,updated&limit=1'):await store.rest('forma_profiles','user_id='+eq(user.id)+'&select=data,updated&limit=1');
+          if(!currentRows.length)throw new HttpError(404,'Editable resource not found.');
+          if(Number(currentRows[0].updated)!==expected)throw new HttpError(409,'Resource changed since restore preview.');
+          let content;
+          if(version.domain==='course'){
+            content=version.previous;
+            if(!content||typeof content.title!=='string'||!content.title.trim())throw new HttpError(400,'Saved course version is invalid.');
+            try{validateOutline(content.outline);}catch{throw new HttpError(400,'Saved course version is invalid.');}
+            if(content.outline?.archived)throw new HttpError(409,'Restore archived courses through Trash.');
+          }else content=sanitize(version.previous,user);
+          const result=await store.rpc('forma_assistant_commit',{p_user_id:user.id,p_domain:version.domain,p_resource_id:version.resource_id,p_expected_updated:expected,p_content:content,p_operation:'restore-version',p_version_id:id(),p_audit_id:id(),p_now:Date.now()});
+          if(!result?.saved)throw new HttpError(409,'Resource changed during restoration.');
+          return json(res,200,{restored:true,domain:version.domain,resourceId:version.resource_id,versionId:result.versionId});
+        }
         if(p==='/api/assistant/versions'&&method==='GET'){
           const user=await auth(req);
           const versions=await store.rest('forma_assistant_versions','user_id='+eq(user.id)+'&select=id,domain,resource_id,created&order=created.desc&limit=40');
