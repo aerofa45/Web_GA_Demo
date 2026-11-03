@@ -1,6 +1,12 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict'),http=require('node:http'),crypto=require('node:crypto');
 const {createApp}=require('../cloud-server');
+const {validateOutline}=require('../course');
+test('Course themes accept supported styles and reject arbitrary input',()=>{
+ for(const theme of ['midnight','daylight','forest'])assert.equal(validateOutline({chapters:[],theme}).theme,theme);
+ assert.throws(()=>validateOutline({chapters:[],theme:'invalid'}),/Invalid course outline/);
+ assert.throws(()=>validateOutline({chapters:[],theme:'forest'},{generated:true}),/Invalid course outline/);
+});
 const sha=s=>crypto.createHash('sha256').update(s).digest('hex');
 test('OAuth PKCE, refresh, scoped MCP access and revocation',async t=>{
  const flag=process.env.FORMA_MCP_ENABLED;process.env.FORMA_MCP_ENABLED='true';t.after(()=>{if(flag===undefined)delete process.env.FORMA_MCP_ENABLED;else process.env.FORMA_MCP_ENABLED=flag});
