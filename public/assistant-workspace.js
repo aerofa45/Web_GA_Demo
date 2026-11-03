@@ -6,6 +6,20 @@ async function api(url,opt={}){const r=await fetch(url,{credentials:'same-origin
 function renderOps(){pending=null;$('apply').disabled=true;$('course-choice').hidden=domain.value!=='course';action.replaceChildren();for(const item of ops[domain.value]){const opt=document.createElement('option');opt.value=item.value;opt.textContent=item.label;action.append(opt)}}
 async function init(){try{const me=await api('/api/me');if(!me.user){location.href='/login';return}const result=await api('/api/account/role');if(result.role==='instructor'){const courses=await api('/api/course-drafts');for(const c of courses.courses){const o=document.createElement('option');o.value=c.id;o.textContent=c.title;course.append(o)}}else status.textContent='Student mode: portfolio edits are available. Course edits require instructor mode.';await history()}catch(e){status.textContent=e.message}}
 function build(){const values=action.value.split(':'),position=Number($('position').value)-1,chapter=Number($('chapter').value)-1,title=$('title').value.trim(),content=$('content').value.trim();if(domain.value==='portfolio'){const section=values[0],operation=values[1],data={section,operation};if(operation!=='add')data.index=position;if(operation!=='remove')data.entry={title,subtitle:'',description:content};return {url:'/api/portfolio-edit',data}}const operation=values[0],data={courseId:course.value,operation};if(!data.courseId)throw Error('Select a course first.');if(['rename-course','add-chapter','rename-chapter','add-lesson','edit-lesson'].includes(operation))data.title=title;if(['add-lesson','edit-lesson'].includes(operation))data.content=content;if(['rename-chapter','add-lesson','edit-lesson','remove-lesson'].includes(operation))data.chapterIndex=chapter;if(['edit-lesson','remove-lesson'].includes(operation))data.lessonIndex=position;return {url:'/api/course-edit',data}}
+$('upload-resource').onclick=async()=>{
+ const file=$('resource-pdf').files?.[0],message=$('resource-status');
+ if(!file){message.textContent='Choose a PDF first.';return}
+ if(domain.value!=='course'||!course.value){message.textContent='Select My course and choose the course before uploading.';return}
+ if(file.type!=='application/pdf'&&!file.name.toLowerCase().endsWith('.pdf')){message.textContent='PDF files only.';return}
+ if(file.size>1800000||file.size<8){message.textContent='PDF must be under 1.8 MB.';return}
+ const button=$('upload-resource');button.disabled=true;message.textContent='Uploading PDF…';
+ try{
+  const data=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(Error('Could not read PDF.'));reader.readAsDataURL(file)});
+  const result=await api('/api/course-pdf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({courseId:course.value,name:file.name,data})});
+  message.textContent='Uploaded privately: '+result.file.name+'. To use the file as generation material, open Course Studio and select it under Teaching material.';
+  $('resource-pdf').value='';
+ }catch(e){message.textContent=e.message}finally{button.disabled=false}
+};
 $('interpret').onclick=async()=>{
  const request=$('natural-request').value.trim(),message=$('interpret-status');
  message.textContent='Interpreting request…';pending=null;$('apply').disabled=true;
