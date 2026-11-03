@@ -5,7 +5,7 @@ const {validateOutline}=require('../course');
 const uid='a'.repeat(48),cid='c'.repeat(48),pid='d'.repeat(48),token='e'.repeat(48);
 const valid=()=>({chapters:[{title:'Chapter',lessons:[{title:'Lesson',type:'text',content:'Explanation'}]}]});
 async function setup(t,options={}){
- const tables={forma_sessions:[{tokenhash:crypto.createHash('sha256').update(token).digest('hex'),expires:Date.now()+60000,user_id:uid}],forma_users:[{id:uid,email:'teacher@example.com'}],forma_course_drafts:[{id:cid,user_id:uid,title:'Original',outline:valid(),updated:1}],forma_course_files:[{id:pid,user_id:uid,course_id:cid,object_key:'private.pdf'}],forma_course_enrollments:[],forma_drive_video_grants:[],forma_google_connections:[],forma_assignments:[],forma_submissions:[],forma_quizzes:[],forma_quiz_attempts:[],forma_lesson_progress:[],forma_submission_files:[],forma_attendance:[],forma_notifications:[],forma_course_subscription_prices:[],forma_test_subscriptions:[],forma_account_roles:[{user_id:uid,role:'instructor'}],forma_assistant_audit:[],forma_assistant_versions:[],forma_profiles:[{user_id:uid,data:{name:'Teacher',experience:[],education:[],research:[],projects:[],publications:[]},updated:1}]};
+ const tables={forma_sessions:[{tokenhash:crypto.createHash('sha256').update(token).digest('hex'),expires:Date.now()+60000,user_id:uid}],forma_users:[{id:uid,email:'teacher@example.com'}],forma_course_drafts:[{id:cid,user_id:uid,title:'Original',outline:valid(),updated:1}],forma_course_files:[{id:pid,user_id:uid,course_id:cid,object_key:'private.pdf'}],forma_course_enrollments:[],forma_drive_video_grants:[],forma_google_connections:[],forma_assignments:[],forma_submissions:[],forma_quizzes:[],forma_quiz_attempts:[],forma_lesson_progress:[],forma_submission_files:[],forma_attendance:[],forma_notifications:[],forma_course_prices:[],forma_test_orders:[],forma_course_subscription_prices:[],forma_test_subscriptions:[],forma_account_roles:[{user_id:uid,role:'instructor'}],forma_assistant_audit:[],forma_assistant_versions:[],forma_profiles:[{user_id:uid,data:{name:'Teacher',experience:[],education:[],research:[],projects:[],publications:[]},updated:1}]};
  const state={calls:[],rates:0,reply:()=>new Response(JSON.stringify({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(valid())}]}}]})),pdf:Buffer.from('%PDF-1.4 fixture')};
  const store={url:'https://example.supabase.co',key:'fixture',async rpc(name,args){state.rates++;if(name==='forma_assistant_add_assessments'){
    const owned=tables.forma_course_drafts.find(x=>x.id===args.p_course_id&&x.user_id===args.p_user_id&&!x.outline?.archived);
@@ -22,11 +22,11 @@ async function setup(t,options={}){
    tables.forma_assistant_versions.push({id:args.p_version_id,user_id:args.p_user_id,domain:'course',resource_id:target.id,created:args.p_now,previous:{title:target.title,outline:structuredClone(target.outline)}});
    target.title=args.p_content.title;target.outline=structuredClone(args.p_content.outline);target.updated=Math.max(args.p_now,target.updated+1);
    return {saved:true,versionId:args.p_version_id};
-  }return true;},async rest(table,query='',method='GET',body){const q=new URLSearchParams(query);const matches=r=>[...q].every(([k,v])=>['select','limit','order'].includes(k)||v.startsWith('eq.')&&String(r[k])===decodeURIComponent(v.slice(3))||v.startsWith('gt.')&&r[k]>Number(v.slice(3)));const rows=tables[table].filter(matches);if(method==='POST'){tables[table].push(structuredClone(body));return null;}if(method==='PATCH'){rows.forEach(r=>Object.assign(r,structuredClone(body)));return null;}if(method==='DELETE'){tables[table]=tables[table].filter(r=>!matches(r));return null;}return structuredClone(rows).map(row=>q.has('select')&&q.get('select')!=='*'?Object.fromEntries(q.get('select').split(',').map(k=>[k,row[k]])):row);}};
- const server=http.createServer(createApp(store,{geminiKey:'fake-test-key',...options,fetcher:async(url,options)=>{state.calls.push({url,options});return url.includes('googleapis')?state.reply():new Response(state.pdf);}}));
+  }return true;},async rest(table,query='',method='GET',body){const q=new URLSearchParams(query);const matches=r=>[...q].every(([k,v])=>['select','limit','order'].includes(k)||v.startsWith('eq.')&&String(r[k])===decodeURIComponent(v.slice(3))||v.startsWith('gt.')&&r[k]>Number(v.slice(3))||v.startsWith('in.(')&&v.slice(4,-1).split(',').includes(String(r[k])));const rows=tables[table].filter(matches);if(method==='POST'){tables[table].push(structuredClone(body));return null;}if(method==='PATCH'){rows.forEach(r=>Object.assign(r,structuredClone(body)));return null;}if(method==='DELETE'){tables[table]=tables[table].filter(r=>!matches(r));return null;}return structuredClone(rows).map(row=>q.has('select')&&q.get('select')!=='*'?Object.fromEntries(q.get('select').split(',').map(k=>[k,row[k]])):row);}};
+ const server=http.createServer(createApp(store,{geminiKey:'fake-test-key',...options,fetcher:async(url,options)=>{state.calls.push({url,options});return state.provider?state.provider(url,options):url.includes('googleapis')?state.reply():new Response(state.pdf);}}));
  await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>{server.closeAllConnections();server.close();});
  async function req(route,body,authenticated=true,method='POST'){const r=await fetch('http://127.0.0.1:'+server.address().port+route,{method,headers:{'Content-Type':'application/json',...(authenticated?{cookie:'forma_session='+token}:{})},body:method==='GET'?undefined:JSON.stringify(body)});return {status:r.status,body:await r.json()};}
- return {state,tables,req};
+ return {state,tables,req,serverUrl:'http://127.0.0.1:'+server.address().port};
 }
 test('outline validation rejects malformed nested output and keeps editable empty drafts',()=>{
  validateOutline({chapters:[]});validateOutline(valid(),{generated:true});
@@ -345,4 +345,105 @@ test('assistant interpretation receives bounded conversation history without sav
  assert.doesNotMatch(upstream,/Earlier message 0/);
  assert.equal(tables.forma_assistant_versions.length,0);
  assert.equal(tables.forma_assistant_audit.length,0);
+});
+
+test('published course preserves saved theme without leaking attachment identifiers',async t=>{
+ const {tables,req}=await setup(t);const course=tables.forma_course_drafts[0];course.published=true;
+ for(const theme of ['midnight','daylight','forest']){
+  course.outline.theme=theme;course.outline.chapters[0].lessons[0].driveFile={id:'private-video-123',name:'Private',mimeType:'video/mp4'};
+  const view=await req('/api/course-view/'+cid,undefined,false,'GET');assert.equal(view.status,200);assert.equal(view.body.course.outline.theme,theme);
+  assert.equal(view.body.course.outline.chapters[0].lessons[0].hasDriveVideo,true);
+  assert.doesNotMatch(JSON.stringify(view.body),/private-video-123|private.pdf/);
+ }
+});
+
+function providerEnvironment(t){
+ const vars={STRIPE_TEST_SECRET_KEY:'sk_test_fixture',STRIPE_TEST_WEBHOOK_SECRET:'whsec_fixture',GOOGLE_CLIENT_ID:'fixture',GOOGLE_CLIENT_SECRET:'fixture',GOOGLE_TOKEN_ENCRYPTION_KEY:'1'.repeat(64)};
+ const before=Object.fromEntries(Object.keys(vars).map(k=>[k,process.env[k]]));Object.assign(process.env,vars);
+ t.after(()=>{for(const [k,v] of Object.entries(before)){if(v===undefined)delete process.env[k];else process.env[k]=v;}});
+ const iv=crypto.randomBytes(12),cipher=crypto.createCipheriv('aes-256-gcm',Buffer.from(vars.GOOGLE_TOKEN_ENCRYPTION_KEY,'hex'),iv);
+ const encrypted=Buffer.concat([cipher.update('fixture-refresh','utf8'),cipher.final()]);
+ return Buffer.concat([iv,cipher.getAuthTag(),encrypted]).toString('base64');
+}
+async function webhook(serverUrl,type,object,{valid=true,age=0}={}){
+ const raw=JSON.stringify({id:'evt_fixture',type,data:{object}}),timestamp=String(Math.floor(Date.now()/1000)-age);
+ const sig=crypto.createHmac('sha256',valid?'whsec_fixture':'wrong').update(timestamp+'.'+raw).digest('hex');
+ const r=await fetch(serverUrl+'/api/stripe-test/webhook',{method:'POST',headers:{'content-type':'application/json','stripe-signature':'t='+timestamp+',v1='+sig},body:raw});
+ return {status:r.status,body:await r.json()};
+}
+function studentFixture(tables){
+ const student='b'.repeat(48);tables.forma_users.push({id:student,email:'student@example.com'});
+ tables.forma_course_drafts[0].published=true;
+ tables.forma_google_connections.push({user_id:student,role:'student',email:'student@example.com',google_sub:'fixture-sub'});
+ tables.forma_course_enrollments.push({course_id:cid,email:'student@example.com',status:'pending'});return student;
+}
+test('signed Stripe payment validates signature, amount, mode, replay and keeps approval separate',async t=>{
+ providerEnvironment(t);const {tables,serverUrl}=await setup(t);const student=studentFixture(tables),order='f'.repeat(48);
+ tables.forma_test_orders.push({id:order,course_id:cid,student_id:student,checkout_session_id:'cs_test_fixture',status:'pending',amount_cents:500,currency:'usd'});
+ const paid={id:'cs_test_fixture',livemode:false,payment_status:'paid',currency:'usd',amount_total:500,metadata:{order_id:order}};
+ assert.equal((await webhook(serverUrl,'checkout.session.completed',paid,{valid:false})).status,400);
+ assert.equal((await webhook(serverUrl,'checkout.session.completed',paid,{age:601})).status,400);
+ assert.equal((await webhook(serverUrl,'checkout.session.completed',{...paid,livemode:true})).status,200);
+ assert.equal(tables.forma_test_orders[0].status,'pending');
+ assert.equal((await webhook(serverUrl,'checkout.session.completed',{...paid,amount_total:1})).status,400);
+ for(let n=0;n<2;n++)assert.equal((await webhook(serverUrl,'checkout.session.completed',paid)).status,200);
+ assert.equal(tables.forma_test_orders[0].status,'paid');assert.equal(tables.forma_course_enrollments[0].status,'pending');
+});
+test('paid enrollment gates approval and Drive permission failures deny access until retry',async t=>{
+ const refresh_cipher=providerEnvironment(t);const {tables,state,req}=await setup(t);const student=studentFixture(tables);
+ tables.forma_course_prices.push({course_id:cid,enabled:true,amount_cents:500});
+ const decision='/api/course-enrollments/'+cid+'/decision';
+ assert.equal((await req(decision,{email:'student@example.com',decision:'approve'})).status,402);
+ tables.forma_test_orders.push({id:'f'.repeat(48),course_id:cid,student_id:student,status:'paid'});
+ const file='fixture-video-123';tables.forma_course_drafts[0].outline.chapters[0].lessons[0].driveFile={id:file,name:'Private lesson',mimeType:'video/mp4'};
+ tables.forma_google_connections.push({user_id:uid,role:'instructor',refresh_cipher});
+ let fail=true,deleted=0;state.provider=async(url,opts)=>{
+  if(url.includes('oauth2.googleapis.com'))return Response.json({access_token:'fixture-access'});
+  if(opts.method==='POST')return fail?new Response('{}',{status:403}):Response.json({id:'permission-fixture'});
+  if(opts.method==='DELETE'){deleted++;return new Response(null,{status:204});}
+  throw Error('Unexpected provider request');
+ };
+ assert.equal((await req(decision,{email:'student@example.com',decision:'approve'})).status,502);
+ assert.equal(tables.forma_course_enrollments[0].status,'pending');assert.equal(tables.forma_drive_video_grants.length,0);
+ fail=false;assert.equal((await req(decision,{email:'student@example.com',decision:'approve'})).status,200);
+ assert.equal(tables.forma_drive_video_grants.length,1);
+ tables.forma_sessions[0].user_id=student;assert.equal((await req('/api/course-video/'+cid+'/0/0',undefined,true,'GET')).status,200);
+ tables.forma_sessions[0].user_id=uid;assert.equal((await req(decision,{email:'student@example.com',decision:'revoke'})).status,200);
+ assert.equal(deleted,1);assert.equal(tables.forma_drive_video_grants.length,0);
+ tables.forma_sessions[0].user_id=student;assert.equal((await req('/api/course-video/'+cid+'/0/0',undefined,true,'GET')).status,403);
+});
+test('full refund revokes LMS immediately and retries failed Drive removal idempotently',async t=>{
+ const refresh_cipher=providerEnvironment(t);const {tables,state,req,serverUrl}=await setup(t);const student=studentFixture(tables);
+ tables.forma_course_enrollments[0].status='approved';
+ tables.forma_test_orders.push({id:'f'.repeat(48),course_id:cid,student_id:student,checkout_session_id:'cs_test_fixture',status:'paid'});
+ tables.forma_drive_video_grants.push({course_id:cid,email:'student@example.com',file_id:'fixture-video-123',permission_id:'permission-fixture'});
+ tables.forma_google_connections.push({user_id:uid,role:'instructor',refresh_cipher});
+ let fail=true,removed=0;state.provider=async(url,opts)=>{
+  if(url.includes('api.stripe.com'))return Response.json({data:[{id:'cs_test_fixture',livemode:false}]});
+  if(url.includes('oauth2.googleapis.com'))return Response.json({access_token:'fixture-access'});
+  if(opts.method==='DELETE'){removed++;return fail?new Response('{}',{status:503}):new Response(null,{status:204});}
+  throw Error('Unexpected provider request');
+ };
+ const charge={livemode:false,payment_intent:'pi_fixture',refunded:true};
+ assert.equal((await webhook(serverUrl,'charge.refunded',{...charge,refunded:false})).status,200);assert.equal(tables.forma_test_orders[0].status,'paid');
+ assert.equal((await webhook(serverUrl,'charge.refunded',charge)).status,502);
+ assert.equal(tables.forma_test_orders[0].status,'refunded');assert.equal(tables.forma_course_enrollments[0].status,'revoked');assert.equal(tables.forma_drive_video_grants.length,1);
+ tables.forma_sessions[0].user_id=student;assert.equal((await req('/api/lms/'+cid+'/assignments',undefined,true,'GET')).status,403);
+ fail=false;for(let n=0;n<2;n++)assert.equal((await webhook(serverUrl,'charge.refunded',charge)).status,200);
+ assert.equal(tables.forma_drive_video_grants.length,0);assert.equal(removed,2);
+});
+test('refund preserves another paid entitlement and a Drive share needed by another course',async t=>{
+ const refresh_cipher=providerEnvironment(t);const {tables,state,serverUrl}=await setup(t);const student=studentFixture(tables);tables.forma_course_enrollments[0].status='approved';
+ tables.forma_test_orders.push({id:'1'.repeat(48),course_id:cid,student_id:student,checkout_session_id:'cs_test_fixture',status:'paid'},{id:'2'.repeat(48),course_id:cid,student_id:student,checkout_session_id:'cs_test_second',status:'paid'});
+ tables.forma_drive_video_grants.push({course_id:cid,email:'student@example.com',file_id:'fixture-video-123',permission_id:'permission-fixture'},{course_id:'9'.repeat(48),email:'student@example.com',file_id:'fixture-video-123',permission_id:'permission-fixture'});
+ tables.forma_google_connections.push({user_id:uid,role:'instructor',refresh_cipher});
+ state.provider=async(url)=>{
+  if(url.includes('api.stripe.com'))return Response.json({data:[{id:'cs_test_fixture',livemode:false}]});
+  if(url.includes('oauth2.googleapis.com'))return Response.json({access_token:'fixture-access'});
+  throw Error('Shared permission must not be removed');
+ };
+ const charge={livemode:false,payment_intent:'pi_fixture',refunded:true};assert.equal((await webhook(serverUrl,'charge.refunded',charge)).status,200);
+ assert.equal(tables.forma_course_enrollments[0].status,'approved');assert.equal(tables.forma_drive_video_grants.length,2);
+ tables.forma_test_orders[1].status='refunded';assert.equal((await webhook(serverUrl,'charge.refunded',charge)).status,200);
+ assert.equal(tables.forma_course_enrollments[0].status,'revoked');assert.equal(tables.forma_drive_video_grants.length,1);assert.equal(tables.forma_drive_video_grants[0].course_id,'9'.repeat(48));
 });
