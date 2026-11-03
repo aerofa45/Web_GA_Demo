@@ -7,7 +7,7 @@ const valid=()=>({chapters:[{title:'Chapter',lessons:[{title:'Lesson',type:'text
 async function setup(t,options={}){
  const tables={forma_sessions:[{tokenhash:crypto.createHash('sha256').update(token).digest('hex'),expires:Date.now()+60000,user_id:uid}],forma_users:[{id:uid,email:'teacher@example.com'}],forma_course_drafts:[{id:cid,user_id:uid,title:'Original',outline:valid()}],forma_course_files:[{id:pid,user_id:uid,course_id:cid,object_key:'private.pdf'}],forma_course_enrollments:[],forma_drive_video_grants:[],forma_google_connections:[],forma_assignments:[],forma_submissions:[],forma_quizzes:[],forma_quiz_attempts:[],forma_lesson_progress:[],forma_submission_files:[],forma_attendance:[],forma_notifications:[],forma_course_subscription_prices:[],forma_test_subscriptions:[],forma_account_roles:[{user_id:uid,role:'instructor'}],forma_assistant_audit:[],forma_assistant_versions:[],forma_profiles:[{user_id:uid,data:{name:'Teacher',experience:[],education:[],research:[],projects:[],publications:[]},updated:1}]};
  const state={calls:[],rates:0,reply:()=>new Response(JSON.stringify({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(valid())}]}}]})),pdf:Buffer.from('%PDF-1.4 fixture')};
- const store={url:'https://example.supabase.co',key:'fixture',async rpc(){state.rates++;return true;},async rest(table,query='',method='GET',body){const q=new URLSearchParams(query);const matches=r=>[...q].every(([k,v])=>['select','limit','order'].includes(k)||v.startsWith('eq.')&&String(r[k])===decodeURIComponent(v.slice(3))||v.startsWith('gt.')&&r[k]>Number(v.slice(3)));const rows=tables[table].filter(matches);if(method==='PATCH'){rows.forEach(r=>Object.assign(r,structuredClone(body)));return null;}return structuredClone(rows).map(row=>q.has('select')&&q.get('select')!=='*'?Object.fromEntries(q.get('select').split(',').map(k=>[k,row[k]])):row);}};
+ const store={url:'https://example.supabase.co',key:'fixture',async rpc(){state.rates++;return true;},async rest(table,query='',method='GET',body){const q=new URLSearchParams(query);const matches=r=>[...q].every(([k,v])=>['select','limit','order'].includes(k)||v.startsWith('eq.')&&String(r[k])===decodeURIComponent(v.slice(3))||v.startsWith('gt.')&&r[k]>Number(v.slice(3)));const rows=tables[table].filter(matches);if(method==='POST'){tables[table].push(structuredClone(body));return null;}if(method==='PATCH'){rows.forEach(r=>Object.assign(r,structuredClone(body)));return null;}if(method==='DELETE'){tables[table]=tables[table].filter(r=>!matches(r));return null;}return structuredClone(rows).map(row=>q.has('select')&&q.get('select')!=='*'?Object.fromEntries(q.get('select').split(',').map(k=>[k,row[k]])):row);}};
  const server=http.createServer(createApp(store,{geminiKey:'fake-test-key',...options,fetcher:async(url,options)=>{state.calls.push({url,options});return url.includes('googleapis')?state.reply():new Response(state.pdf);}}));
  await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>{server.closeAllConnections();server.close();});
  async function req(route,body,authenticated=true,method='POST'){const r=await fetch('http://127.0.0.1:'+server.address().port+route,{method,headers:{'Content-Type':'application/json',...(authenticated?{cookie:'forma_session='+token}:{})},body:method==='GET'?undefined:JSON.stringify(body)});return {status:r.status,body:await r.json()};}
@@ -149,7 +149,26 @@ test('enrollment requests reject an unverified student account',async t=>{
  const route='/api/course-enrollments/'+cid+'/request';
  assert.equal((await req(route,{})).status,403);
  tables.forma_google_connections.push({user_id:'b'.repeat(48),role:'student',email:'student@example.com',google_sub:'verified'});
- // The mock database in setup does not yet support INSERT; existing enrollment requests are updated in production.
+ const first=await req(route,{});assert.equal(first.status,200);assert.equal(first.body.status,'pending');
+ assert.equal(tables.forma_course_enrollments.length,1);
+ assert.equal(tables.forma_course_enrollments[0].email,'student@example.com');
+ assert.equal((await req(route,{})).status,200);
+ assert.equal(tables.forma_course_enrollments.length,1,'repeat requests must not create duplicates');
+ assert.equal((await req('/api/lms/'+cid+'/assignments',undefined,true,'GET')).status,403,'pending students have no course access');
+ // Restore instructor session to approve a verified student, then test revocation.
+ tables.forma_sessions[0].user_id=uid;
+ const decision='/api/course-enrollments/'+cid+'/decision';
+ assert.equal((await req(decision,{email:'student@example.com',decision:'approve'})).status,200);
+ assert.equal(tables.forma_course_enrollments[0].status,'approved');
+ tables.forma_sessions[0].user_id='b'.repeat(48);
+ assert.equal((await req('/api/lms/'+cid+'/assignments',undefined,true,'GET')).status,200);
+ assert.equal((await req(route,{})).body.status,'approved');
+ tables.forma_sessions[0].user_id=uid;
+ assert.equal((await req(decision,{email:'student@example.com',decision:'revoke'})).status,200);
+ assert.equal(tables.forma_course_enrollments[0].status,'revoked');
+ tables.forma_sessions[0].user_id='b'.repeat(48);
+ assert.equal((await req(route,{})).status,403,'revoked students cannot request access again');
+ assert.equal((await req('/api/lms/'+cid+'/assignments',undefined,true,'GET')).status,403);
 });
 
 test('LMS denies unapproved access and permits instructor to view empty gradebook',async t=>{
