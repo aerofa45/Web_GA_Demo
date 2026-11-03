@@ -70,7 +70,15 @@ async function oauthRoutes({req,res,p,method,url,store,current,origin,rate}){
    await store.rest('forma_oauth_tokens','','POST',{access_hash:hash(access),refresh_hash:hash(refresh),client_id:cid,user_id:verified.user_id,scopes:verified.scopes,expires:now+3600000,refresh_expires:now+2592000000,created:now});
    response(res,200,{access_token:access,refresh_token:refresh,token_type:'Bearer',expires_in:3600,scope:verified.scopes});return true;
   }
-  if(b.grant_type==='refresh_token')problem(400,'Refresh rotation not enabled yet; reconnect to renew authorization.');
+  if(b.grant_type==='refresh_token'){
+   const previous=String(b.refresh_token||'');
+   if(!/^[A-Za-z0-9_-]{20,100}$/.test(previous))problem(400,'Invalid refresh token.');
+   await rate(req,'oauth-refresh',100,3600000);
+   const access=random(),refresh=random(),now=Date.now();
+   const verified=await store.rpc('forma_oauth_rotate_refresh',{p_refresh_hash:hash(previous),p_client_id:cid,p_new_access_hash:hash(access),p_new_refresh_hash:hash(refresh),p_now:now});
+   if(!verified?.user_id)problem(401,'Refresh token expired or revoked. Reconnect your account.');
+   response(res,200,{access_token:access,refresh_token:refresh,token_type:'Bearer',expires_in:3600,scope:verified.scopes});return true;
+  }
   problem(400,'Unsupported OAuth grant type.');
  }
  if(p==='/api/connector/revoke'&&method==='POST'){
