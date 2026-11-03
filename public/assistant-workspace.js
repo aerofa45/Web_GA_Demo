@@ -6,6 +6,30 @@ async function api(url,opt={}){const r=await fetch(url,{credentials:'same-origin
 function renderOps(){pending=null;$('apply').disabled=true;$('course-choice').hidden=domain.value!=='course';action.replaceChildren();for(const item of ops[domain.value]){const opt=document.createElement('option');opt.value=item.value;opt.textContent=item.label;action.append(opt)}}
 async function init(){try{const me=await api('/api/me');if(!me.user){location.href='/login';return}const result=await api('/api/account/role');if(result.role==='instructor'){const courses=await api('/api/course-drafts');for(const c of courses.courses){const o=document.createElement('option');o.value=c.id;o.textContent=c.title;course.append(o)}}else status.textContent='Student mode: portfolio edits are available. Course edits require instructor mode.';await history()}catch(e){status.textContent=e.message}}
 function build(){const values=action.value.split(':'),position=Number($('position').value)-1,chapter=Number($('chapter').value)-1,title=$('title').value.trim(),content=$('content').value.trim();if(domain.value==='portfolio'){const section=values[0],operation=values[1],data={section,operation};if(operation!=='add')data.index=position;if(operation!=='remove')data.entry={title,subtitle:'',description:content};return {url:'/api/portfolio-edit',data}}const operation=values[0],data={courseId:course.value,operation};if(!data.courseId)throw Error('Select a course first.');if(['rename-course','add-chapter','rename-chapter','add-lesson','edit-lesson'].includes(operation))data.title=title;if(['add-lesson','edit-lesson'].includes(operation))data.content=content;if(['rename-chapter','add-lesson','edit-lesson','remove-lesson'].includes(operation))data.chapterIndex=chapter;if(['edit-lesson','remove-lesson'].includes(operation))data.lessonIndex=position;return {url:'/api/course-edit',data}}
+$('interpret').onclick=async()=>{
+ const request=$('natural-request').value.trim(),message=$('interpret-status');
+ message.textContent='Interpreting request…';pending=null;$('apply').disabled=true;
+ try{
+  const response=await api('/api/assistant/interpret',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({request,domain:domain.value})});
+  const suggestion=response.suggestion;
+  if(domain.value==='portfolio'){
+   const candidate=suggestion.section+':'+suggestion.operation;
+   if(!ops.portfolio.some(x=>x.value===candidate))throw Error('Unsupported portfolio action.');
+   action.value=candidate;
+   $('title').value=suggestion.entry?.title||'';
+   $('content').value=suggestion.entry?.description||'';
+   $('position').value=Number.isInteger(suggestion.index)?suggestion.index+1:1;
+  }else{
+   if(!ops.course.some(x=>x.value===suggestion.operation))throw Error('Unsupported course action.');
+   action.value=suggestion.operation;
+   $('title').value=suggestion.title||'';
+   $('content').value=suggestion.content||'';
+   $('chapter').value=Number.isInteger(suggestion.chapterIndex)?suggestion.chapterIndex+1:1;
+   $('position').value=Number.isInteger(suggestion.lessonIndex)?suggestion.lessonIndex+1:1;
+  }
+  message.textContent='Suggested action populated. Check all fields, then click Preview change. No edits saved.';
+ }catch(e){message.textContent=e.message}
+};
 $('preview').onclick=async()=>{try{const op=build(),result=await api(op.url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(op.data)});pending={...op,expectedUpdated:result.expectedUpdated};$('result').textContent=JSON.stringify(result,null,2);$('apply').disabled=false;status.textContent='Preview ready. Review before saving.'}catch(e){pending=null;$('apply').disabled=true;status.textContent=e.message}};
 $('apply').onclick=async()=>{if(!pending)return;const planned=pending;$('apply').disabled=true;try{const result=await api(planned.url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...planned.data,expectedUpdated:planned.expectedUpdated,confirm:true})});pending=null;$('result').textContent=JSON.stringify(result,null,2);status.textContent='Saved. Preview the updated page.';if(result.url){$('open-resource').href=result.url;$('open-resource').hidden=false}await history()}catch(e){status.textContent=e.message}};
 async function history(){const result=await api('/api/assistant/history');$('history').replaceChildren();for(const c of result.changes){const p=document.createElement('p');p.textContent=new Date(Number(c.created)).toLocaleString()+' · '+c.domain+' · '+c.operation;$('history').append(p)}}
