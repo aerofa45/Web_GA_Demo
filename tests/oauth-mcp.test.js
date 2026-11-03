@@ -29,7 +29,7 @@ test('OAuth PKCE, refresh, scoped MCP access and revocation',async t=>{
   return null;
  },async rest(table,query='',method='GET',payload){
   if(!tables[table])throw Error('Missing fixture table '+table);
-  const p=new URLSearchParams(query),matches=r=>[...p].every(([k,v])=>['select','limit','order'].includes(k)||v.startsWith('eq.')&&String(r[k])===decodeURIComponent(v.slice(3))||v.startsWith('gt.')&&r[k]>Number(v.slice(3)));
+  const p=new URLSearchParams(query),matches=r=>[...p].every(([k,v])=>['select','limit','order'].includes(k)||v.startsWith('eq.')&&String(r[k])===decodeURIComponent(v.slice(3))||v.startsWith('gt.')&&r[k]>Number(v.slice(3))||v.startsWith('in.(')&&v.endsWith(')')&&v.slice(4,-1).split(',').includes(String(r[k])));
   const rows=tables[table].filter(matches);
   if(method==='POST'){tables[table].push(structuredClone(payload));return null}
   if(method==='PATCH'){for(const row of rows)Object.assign(row,structuredClone(payload));return null}
