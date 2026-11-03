@@ -42,7 +42,7 @@
   }
   document.getElementById('content').append(panel);
  }
- const lms=document.createElement('section');lms.id='lms-student';document.getElementById('content').append(lms);const lmsScript=document.createElement('script');lmsScript.src='/lms-student.js';lmsScript.defer=true;document.body.append(lmsScript);
+ const lms=document.createElement('section');lms.id='lms-student';document.getElementById('content').append(lms);const lmsScript=document.createElement('script');lmsScript.src='/lms-student.js?v=classwork-preview-2';lmsScript.defer=true;document.body.append(lmsScript);
  const tabLesson=document.getElementById('tab-lesson'),tabClasswork=document.getElementById('tab-classwork');
  const lessonWorkspace=document.getElementById('lesson-workspace'),classwork=document.getElementById('content');
  function showTab(which){
