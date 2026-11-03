@@ -39,6 +39,17 @@ test('OAuth PKCE, refresh, scoped MCP access and revocation',async t=>{
  t.after(()=>{server.closeAllConnections();server.close()});
  const base='http://127.0.0.1:'+server.address().port;
  const call=(url,options={})=>fetch(base+url,{redirect:'manual',...options});
+ const stripeKeyBefore=process.env.STRIPE_TEST_SECRET_KEY,stripeWebhookBefore=process.env.STRIPE_TEST_WEBHOOK_SECRET;
+ t.after(()=>{if(stripeKeyBefore===undefined)delete process.env.STRIPE_TEST_SECRET_KEY;else process.env.STRIPE_TEST_SECRET_KEY=stripeKeyBefore;if(stripeWebhookBefore===undefined)delete process.env.STRIPE_TEST_WEBHOOK_SECRET;else process.env.STRIPE_TEST_WEBHOOK_SECRET=stripeWebhookBefore;});
+ delete process.env.STRIPE_TEST_SECRET_KEY;delete process.env.STRIPE_TEST_WEBHOOK_SECRET;
+ const noStripe=await call('/api/stripe-test/webhook',{method:'POST',body:'{}'});assert.equal(noStripe.status,503,'Test webhook must fail closed without test credentials');
+ process.env.STRIPE_TEST_SECRET_KEY='sk_test_fixture_only';process.env.STRIPE_TEST_WEBHOOK_SECRET='whsec_fixture_only';
+ const unsigned=await call('/api/stripe-test/webhook',{method:'POST',body:'{}'});assert.equal(unsigned.status,400,'Unsigned webhook must be rejected');
+ const payload=JSON.stringify({id:'evt_test_fixture',type:'ping',livemode:false});
+ const ts=Math.floor(Date.now()/1000),signature=crypto.createHmac('sha256',process.env.STRIPE_TEST_WEBHOOK_SECRET).update(ts+'.'+payload).digest('hex');
+ const signed=await call('/api/stripe-test/webhook',{method:'POST',headers:{'stripe-signature':'t='+ts+',v1='+signature,'Content-Type':'application/json'},body:payload});assert.equal(signed.status,200,'Valid signed test webhook must be acknowledged');
+ const staleTs=ts-3600,staleSignature=crypto.createHmac('sha256',process.env.STRIPE_TEST_WEBHOOK_SECRET).update(staleTs+'.'+payload).digest('hex');
+ const staleStripe=await call('/api/stripe-test/webhook',{method:'POST',headers:{'stripe-signature':'t='+staleTs+',v1='+staleSignature},body:payload});assert.equal(staleStripe.status,400,'Expired webhook signatures must be rejected');
  const authCookie='forma_session='+cookie;
  const meta=await call('/.well-known/oauth-protected-resource');assert.equal(meta.status,200);
  const resource=(await meta.json()).resource;assert.equal(resource,'https://web-ga-demo.onrender.com/mcp');
