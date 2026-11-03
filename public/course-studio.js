@@ -100,4 +100,4 @@ el('publish').addEventListener('click',()=>{if(!published&&!window.confirm('Publ
 el('delete-course').addEventListener('click',async()=>{if(!active||!window.confirm('Move this course to Trash? It will be unpublished. You can restore it from Trash.'))return;const courseId=active;try{await api('/api/course-drafts/'+courseId,{method:'DELETE',body:'{}'});if(active===courseId){active=null;outline={chapters:[]};el('editor').hidden=true;sources();}await list();say('Course moved to Trash. You can restore it below Your courses.');}catch(e){say(e.message);}});
 el('generate').addEventListener('click',()=>generate());
 window.addEventListener('error',e=>say('Page error: '+e.message));window.addEventListener('unhandledrejection',e=>say(e.reason?.message||'Request failed.'));
-api('/api/me').then(d=>{if(!d.user)location.href='/login';else list().catch(e=>say(e.message));}).catch(e=>say(e.message));
+api('/api/me').then(d=>{if(!d.user)location.href='/login';else list().then(async()=>{if(!active){const first=el('courses').querySelector('button');if(first)first.click();}}).catch(e=>say(e.message));}).catch(e=>say(e.message));
