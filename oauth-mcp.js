@@ -1,10 +1,12 @@
 'use strict';
 const crypto=require('node:crypto');
+const {validateOutline}=require('./course');
+const {sanitize}=require('./profile');
 const {URL,URLSearchParams}=require('node:url');
 const random=()=>crypto.randomBytes(32).toString('base64url');
 const hash=s=>crypto.createHash('sha256').update(s).digest('hex');
 const eq=s=>'eq.'+encodeURIComponent(s);
-const knownScopes=['portfolio:read','course:read'];
+const knownScopes=['portfolio:read','course:read','portfolio:write','course:write'];
 function response(res,status,data,headers={}){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...headers});res.end(JSON.stringify(data));}
 function problem(status,message){const e=new Error(message);e.status=status;throw e;}
 async function body(req,asForm=false){
@@ -101,12 +103,33 @@ async function oauthRoutes({req,res,p,method,url,store,current,origin,rate}){
   const error=(code,message)=>response(res,200,{jsonrpc:'2.0',id:rpcId,error:{code,message}});
   if(data.method==='initialize'){success({protocolVersion:'2025-06-18',capabilities:{tools:{}},serverInfo:{name:'Forma Studio',version:'0.1.0'}});return true}
   if(data.method==='notifications/initialized'){res.writeHead(202);res.end();return true}
+  const toolText=value=>({content:[{type:'text',text:JSON.stringify(value)}]});
+  const instructor=async()=>Boolean((await store.rest('forma_account_roles','user_id='+eq(userId)+'&role=eq.instructor&select=role&limit=1')).length);
+  const courseOwned=async courseId=>{
+   if(!/^[a-f0-9]{48}$/.test(String(courseId||'')))problem(400,'Invalid course ID.');
+   const record=(await store.rest('forma_course_drafts','id='+eq(courseId)+'&user_id='+eq(userId)+'&select=id,title,outline,published,updated&limit=1'))[0];
+   if(!record||record.outline?.archived)problem(404,'This course does not belong to your account.');
+   return record;
+  };
+  const prepareCourse=(title,outline)=>{
+   const t=String(title||'').trim().slice(0,140);
+   if(!t)problem(400,'Course title required.');
+   try{validateOutline(outline)}catch{problem(400,'Invalid course outline or lesson content.');}
+   return {title:t,outline};
+  };
+  const checksum=x=>hash(JSON.stringify(x));
   const definitions=[
    {name:'list_my_resources',description:'List only this connected account’s portfolio and authored courses.',inputSchema:{type:'object',properties:{},additionalProperties:false}},
    {name:'get_my_portfolio',description:'Read the connected account’s portfolio content for proposed edits.',inputSchema:{type:'object',properties:{},additionalProperties:false}},
-   {name:'get_my_course',description:'Read a course authored by this account, by ID.',inputSchema:{type:'object',properties:{courseId:{type:'string'}},required:['courseId'],additionalProperties:false}}
+   {name:'get_my_course',description:'Read a course authored by this account, by ID.',inputSchema:{type:'object',properties:{courseId:{type:'string'}},required:['courseId'],additionalProperties:false}},
+   {name:'preview_new_course',description:'Validate a new draft course and return a preview hash. Does not save.',inputSchema:{type:'object',properties:{title:{type:'string'},outline:{type:'object'}},required:['title','outline']}},
+   {name:'create_course_draft',description:'Create a course as an unpublished draft, after explicit instructor confirmation in ChatGPT. Requires a previewHash from preview_new_course. Never publishes.',inputSchema:{type:'object',properties:{title:{type:'string'},outline:{type:'object'},previewHash:{type:'string'}},required:['title','outline','previewHash']}},
+   {name:'preview_course_revision',description:'Preview replacing your course title and complete outline. Returns expectedUpdated and previewHash; does not save.',inputSchema:{type:'object',properties:{courseId:{type:'string'},title:{type:'string'},outline:{type:'object'}},required:['courseId','title','outline']}},
+   {name:'save_course_revision',description:'Save a previously previewed course revision, after explicit instructor confirmation in ChatGPT. Never changes publication status.',inputSchema:{type:'object',properties:{courseId:{type:'string'},title:{type:'string'},outline:{type:'object'},expectedUpdated:{type:'integer'},previewHash:{type:'string'}},required:['courseId','title','outline','expectedUpdated','previewHash']}},
+   {name:'preview_portfolio_revision',description:'Validate a complete revised portfolio against your account and return a preview hash; no save.',inputSchema:{type:'object',properties:{profile:{type:'object'}},required:['profile']}},
+   {name:'save_portfolio_revision',description:'Save complete portfolio only after reviewing the preview and explicit confirmation. Send expectedUpdated and previewHash from preview.',inputSchema:{type:'object',properties:{profile:{type:'object'},expectedUpdated:{type:'integer'},previewHash:{type:'string'}},required:['profile','expectedUpdated','previewHash']}}
   ];
-  if(data.method==='tools/list'){success({tools:definitions.filter(x=>x.name==='list_my_resources'||x.name==='get_my_portfolio'&&scopes.includes('portfolio:read')||x.name==='get_my_course'&&scopes.includes('course:read'))});return true}
+  if(data.method==='tools/list'){success({tools:definitions.filter(x=>x.name==='list_my_resources'||x.name==='get_my_portfolio'&&scopes.includes('portfolio:read')||x.name==='get_my_course'&&scopes.includes('course:read')||x.name.includes('portfolio_revision')&&scopes.includes('portfolio:write')||(['preview_new_course','create_course_draft','preview_course_revision','save_course_revision'].includes(x.name)&&scopes.includes('course:write')))});return true}
   if(data.method!=='tools/call'){error(-32601,'Unknown MCP method.');return true}
   const name=data.params?.name,args=data.params?.arguments||{};
   if(name==='list_my_resources'){
@@ -123,6 +146,38 @@ async function oauthRoutes({req,res,p,method,url,store,current,origin,rate}){
    const owned=(await store.rest('forma_course_drafts','id='+eq(args.courseId)+'&user_id='+eq(userId)+'&select=id,title,outline,published,updated&limit=1'))[0];
    if(!owned||owned.outline?.archived){error(-32004,'Course not found or not owned by connected account.');return true}
    success({content:[{type:'text',text:JSON.stringify(owned)}]});return true;
+  }
+  if(['preview_new_course','create_course_draft','preview_course_revision','save_course_revision'].includes(name)&&scopes.includes('course:write')){
+   if(!await instructor()){error(-32003,'Instructor role required. This user has no administrator access.');return true}
+   const proposed=prepareCourse(args.title,args.outline),previewHash=checksum(proposed);
+   if(name==='preview_new_course'){success(toolText({preview:true,previewHash,title:proposed.title,chapters:proposed.outline.chapters.length,lessons:proposed.outline.chapters.reduce((n,c)=>n+c.lessons.length,0),published:false}));return true}
+   if(name==='create_course_draft'){
+    if(args.previewHash!==previewHash){error(-32009,'Course preview mismatch. Preview the exact same content first.');return true}
+    await rate(req,'mcp-create-course:'+userId,20,3600000);
+    const courseId=crypto.randomBytes(24).toString('hex');
+    const created=await store.rpc('forma_assistant_create_course',{p_user_id:userId,p_course_id:courseId,p_title:proposed.title,p_outline:proposed.outline,p_audit_id:crypto.randomBytes(24).toString('hex'),p_now:Date.now()});
+    success(toolText({created:created?.created===true,courseId,url:site+'/course/'+courseId,published:false}));return true;
+   }
+   const owned=await courseOwned(args.courseId);
+   if(name==='preview_course_revision'){success(toolText({preview:true,previewHash,expectedUpdated:owned.updated,courseId:owned.id,chapters:proposed.outline.chapters.length,published:owned.published}));return true}
+   if(args.previewHash!==previewHash||!Number.isSafeInteger(args.expectedUpdated)){error(-32009,'Preview mismatch or missing version.');return true}
+   const result=await store.rpc('forma_assistant_commit',{p_user_id:userId,p_domain:'course',p_resource_id:owned.id,p_expected_updated:args.expectedUpdated,p_content:proposed,p_operation:'mcp-revise-course',p_version_id:crypto.randomBytes(24).toString('hex'),p_audit_id:crypto.randomBytes(24).toString('hex'),p_now:Date.now()});
+   if(!result?.saved){error(-32009,'Course changed since preview. Refresh and retry.');return true}
+   success(toolText({saved:true,versionId:result.versionId,url:site+'/course/'+owned.id}));return true;
+  }
+  if(['preview_portfolio_revision','save_portfolio_revision'].includes(name)&&scopes.includes('portfolio:write')){
+   const users=await store.rest('forma_users','id='+eq(userId)+'&select=id,name,slug&limit=1');
+   if(!users.length){error(-32001,'Account unavailable.');return true}
+   const rows=await store.rest('forma_profiles','user_id='+eq(userId)+'&select=data,updated&limit=1');
+   if(!rows.length){error(-32004,'Portfolio not found.');return true}
+   if(!args.profile||typeof args.profile!=='object'||Array.isArray(args.profile)){error(-32602,'Provide complete portfolio object.');return true}
+   const next=sanitize(args.profile,users[0]);
+   const previewHash=checksum(next);
+   if(name==='preview_portfolio_revision'){success(toolText({preview:true,previewHash,expectedUpdated:rows[0].updated,sections:{experience:next.experience.length,education:next.education.length,research:next.research.length,projects:next.projects.length,publications:next.publications.length}}));return true}
+   if(args.previewHash!==previewHash||!Number.isSafeInteger(args.expectedUpdated)){error(-32009,'Portfolio preview mismatch or missing version.');return true}
+   const result=await store.rpc('forma_assistant_commit',{p_user_id:userId,p_domain:'portfolio',p_resource_id:userId,p_expected_updated:args.expectedUpdated,p_content:next,p_operation:'mcp-revise-portfolio',p_version_id:crypto.randomBytes(24).toString('hex'),p_audit_id:crypto.randomBytes(24).toString('hex'),p_now:Date.now()});
+   if(!result?.saved){error(-32009,'Portfolio changed since preview. Refresh and retry.');return true}
+   success(toolText({saved:true,versionId:result.versionId,url:site+'/u/'+users[0].slug}));return true;
   }
   error(-32601,'Unknown or unauthorized tool.');return true;
  }
