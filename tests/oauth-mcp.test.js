@@ -5,6 +5,7 @@ const sha=s=>crypto.createHash('sha256').update(s).digest('hex');
 test('OAuth PKCE, refresh, scoped MCP access and revocation',async t=>{
  const flag=process.env.FORMA_MCP_ENABLED;process.env.FORMA_MCP_ENABLED='true';t.after(()=>{if(flag===undefined)delete process.env.FORMA_MCP_ENABLED;else process.env.FORMA_MCP_ENABLED=flag});
  const uid='a'.repeat(48),other='b'.repeat(48),cookie='c'.repeat(48),cid='d'.repeat(48);
+ const rateCalls=[];
  const tables={
   forma_sessions:[{tokenhash:sha(cookie),user_id:uid,expires:Date.now()+3600000}],
   forma_users:[{id:uid,email:'owner@example.test',name:'Instructor',slug:'owner'},{id:other,email:'other@example.test',name:'Other',slug:'other'}],
@@ -14,7 +15,7 @@ test('OAuth PKCE, refresh, scoped MCP access and revocation',async t=>{
   forma_oauth_clients:[],forma_oauth_codes:[],forma_oauth_tokens:[],forma_assignments:[],forma_quizzes:[],forma_assistant_audit:[]
  };
  const store={key:'test-secret-key',url:'https://example.supabase.co',async rpc(name,args){
-  if(name==='forma_limit')return true;
+  if(name==='forma_limit'){rateCalls.push(args);return true;}
   if(name==='forma_oauth_consume_code'){const i=tables.forma_oauth_codes.findIndex(c=>c.code_hash===args.p_hash&&c.client_id===args.p_client_id&&c.redirect_uri===args.p_redirect_uri&&c.challenge===args.p_challenge&&c.expires>args.p_now);if(i<0)return null;const c=tables.forma_oauth_codes.splice(i,1)[0];return {user_id:c.user_id,scopes:c.scopes}}
   if(name==='forma_assistant_add_assessments'){
    if(args.p_user_id!==uid||args.p_course_id!==cid)return {saved:false};
@@ -48,6 +49,7 @@ test('OAuth PKCE, refresh, scoped MCP access and revocation',async t=>{
  const qp=new URLSearchParams({client_id:client.client_id,redirect_uri:'https://chatgpt.com/oauth/callback',response_type:'code',code_challenge_method:'S256',code_challenge:challenge,state:'random-test-state',scope:'portfolio:read course:read course:write',resource});
  const unauth=await call('/oauth/authorize?'+qp);assert.equal(unauth.status,401);
  const consent=await call('/oauth/authorize?'+qp,{headers:{cookie:authCookie}});assert.equal(consent.status,200);
+ assert.match(consent.headers.get('content-security-policy'),/form-action 'self' https:\/\/chatgpt\.com/);
  const page=await consent.text(),nonce=/name="nonce" value="([^"]+)"/.exec(page)?.[1];assert.ok(nonce);
  const consent_expires=/name="consent_expires" value="([^"]+)"/.exec(page)?.[1];
  const consent_signature=/name="consent_signature" value="([^"]+)"/.exec(page)?.[1];
@@ -56,11 +58,14 @@ test('OAuth PKCE, refresh, scoped MCP access and revocation',async t=>{
  const forged=await call('/oauth/authorize',{method:'POST',headers:{cookie:authCookie,'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({...fields,state:'forged-state'})});
  assert.equal(forged.status,403,'Changing OAuth state must invalidate the signed consent');
  const response=await call('/oauth/authorize',{method:'POST',headers:{cookie:authCookie,'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(fields)});
+ assert.ok(rateCalls.some(args=>JSON.stringify(args).includes('oauth-consent:')),'OAuth approval must invoke consent rate limiting');
  assert.equal(response.status,302);const returned=new URL(response.headers.get('location'));assert.equal(returned.searchParams.get('iss'),'https://web-ga-demo.onrender.com');const code=returned.searchParams.get('code');assert.ok(code);
  const token=await call('/oauth/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({grant_type:'authorization_code',code,code_verifier:verifier,client_id:client.client_id,redirect_uri:'https://chatgpt.com/oauth/callback',resource})});
  assert.equal(token.status,200);const creds=await token.json();
  const wrongResource=await call('/oauth/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({grant_type:'refresh_token',client_id:client.client_id,refresh_token:creds.refresh_token,resource:'https://other.example/mcp'})});assert.equal(wrongResource.status,400);assert.ok(creds.access_token);assert.ok(creds.refresh_token);
  const mcp=async(name,args={},access=creds.access_token)=>{const resp=await call('/mcp',{method:'POST',headers:{Authorization:'Bearer '+access,'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name,arguments:args}})});return {status:resp.status,body:await resp.json()}};
+ const toolsResponse=await call('/mcp',{method:'POST',headers:{Authorization:'Bearer '+creds.access_token,'Content-Type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:2,method:'tools/list',params:{}})});
+ assert.equal(toolsResponse.status,200);const discovered=(await toolsResponse.json()).result.tools;assert.equal(discovered.length,11);assert.ok(discovered.find(t=>t.name==='preview_assessment_batch').inputSchema.properties.assessments.properties.quizzes);
  const listing=await mcp('list_my_resources');assert.equal(listing.status,200);assert.match(listing.body.result.content[0].text,/My class/);assert.doesNotMatch(listing.body.result.content[0].text,/Private other class/);
  const denied=await mcp('get_my_course',{courseId:'e'.repeat(48)});assert.equal(denied.body.error.code,-32004);
  const assessment={assignments:[{title:'Homework',instructions:'Explain the method'}],quizzes:[{title:'Quiz',questions:[{prompt:'Which option is correct?',options:['Incorrect','Correct'],correct:1}]}]};
