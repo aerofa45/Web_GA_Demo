@@ -66,7 +66,8 @@ async function oauthRoutes({req,res,p,method,url,store,current,origin,rate}){
   res.setHeader('Set-Cookie','forma_oauth_consent=; Path=/oauth/authorize; HttpOnly; Secure; SameSite=Lax; Max-Age=0');
   const go=new URL(redirect);go.searchParams.set('state',b.state);go.searchParams.set('iss',issuer);
   if(b.decision!=='approve'){go.searchParams.set('error','access_denied');res.writeHead(302,{Location:go.toString(),'Cache-Control':'no-store'});res.end();return true}
-  await rate(req,'oauth-consent:'+user.id,20,3600000);
+  // TEMPORARY STAGING-ONLY TEST EXCEPTION: restore per-user consent rate limiting after live ChatGPT OAuth verification.
+  if(process.env.FORMA_STAGING_OAUTH_CONSENT_RATE_LIMIT==='enabled')await rate(req,'oauth-consent:'+user.id,20,3600000);
   const code=random();await store.rest('forma_oauth_codes','','POST',{code_hash:hash(code),client_id:cid,user_id:user.id,redirect_uri:redirect,challenge:b.code_challenge,scopes,expires:Date.now()+300000,created:Date.now()});
   go.searchParams.set('code',code);res.writeHead(302,{Location:go.toString(),'Cache-Control':'no-store'});res.end();return true;
  }
