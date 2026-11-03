@@ -5,7 +5,8 @@
  const allowedThemes=new Set(['midnight','daylight','forest']);
  const requestedTheme=new URLSearchParams(location.search).get('theme');
  const savedTheme=data.owner?sessionStorage.getItem('forma-preview-theme-'+id):null;
- const initialTheme=allowedThemes.has(requestedTheme)?requestedTheme:allowedThemes.has(savedTheme)?savedTheme:'midnight';
+ const publishedTheme=allowedThemes.has(data.course.outline?.theme)?data.course.outline.theme:'midnight';
+ const initialTheme=data.owner?(allowedThemes.has(requestedTheme)?requestedTheme:allowedThemes.has(savedTheme)?savedTheme:publishedTheme):publishedTheme;
  document.body.dataset.courseTheme=initialTheme;themeSelect.value=initialTheme;
  if(data.owner){
   themeControls.hidden=false;
