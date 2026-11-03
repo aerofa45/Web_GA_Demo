@@ -341,10 +341,23 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
             if(!content||typeof content.title!=='string'||!content.title.trim())throw new HttpError(400,'Saved course version is invalid.');
             try{validateOutline(content.outline);}catch{throw new HttpError(400,'Saved course version is invalid.');}
             if(content.outline?.archived)throw new HttpError(409,'Restore archived courses through Trash.');
-          }else content=sanitize(version.previous,user);
+          }else{
+            if(!version.previous||typeof version.previous!=='object'||Array.isArray(version.previous))throw new HttpError(400,'Saved portfolio version is invalid.');
+            content=sanitize(version.previous,user);
+          }
           const result=await store.rpc('forma_assistant_commit',{p_user_id:user.id,p_domain:version.domain,p_resource_id:version.resource_id,p_expected_updated:expected,p_content:content,p_operation:'restore-version',p_version_id:id(),p_audit_id:id(),p_now:Date.now()});
           if(!result?.saved)throw new HttpError(409,'Resource changed during restoration.');
           return json(res,200,{restored:true,domain:version.domain,resourceId:version.resource_id,versionId:result.versionId});
+        }
+        const snapshotMatch=p.match(/^\/api\/assistant\/version\/([a-f0-9]{48})$/);
+        if(snapshotMatch&&method==='GET'){
+          const user=await auth(req);
+          const items=await store.rest('forma_assistant_versions','id='+eq(snapshotMatch[1])+'&user_id='+eq(user.id)+'&select=id,domain,resource_id,created,previous&limit=1');
+          const version=items[0];if(!version)throw new HttpError(404,'Version not found.');
+          if(version.domain==='course')await requireInstructor(user);
+          const currentRows=version.domain==='course'?await store.rest('forma_course_drafts','id='+eq(version.resource_id)+'&user_id='+eq(user.id)+'&select=id,title,outline,updated&limit=1'):await store.rest('forma_profiles','user_id='+eq(user.id)+'&select=updated&limit=1');
+          if(!currentRows.length)throw new HttpError(404,'Resource not found.');
+          return json(res,200,{version,expectedUpdated:Number(currentRows[0].updated)});
         }
         if(p==='/api/assistant/versions'&&method==='GET'){
           const user=await auth(req);
