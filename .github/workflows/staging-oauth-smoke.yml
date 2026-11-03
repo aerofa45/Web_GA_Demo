@@ -6,6 +6,9 @@ on:
       - 'oauth-mcp.js'
       - 'cloud-server.js'
       - 'tests/staging-smoke.mjs'
+      - 'tests/staging-e2e.mjs'
+      - 'public/assistant-workspace.html'
+      - 'public/assistant-workspace.js'
       - '.github/workflows/staging-oauth-smoke.yml'
   workflow_dispatch:
 permissions:
@@ -20,3 +23,4 @@ jobs:
         with:
           node-version: '22'
       - run: node tests/staging-smoke.mjs
+      - run: node tests/staging-e2e.mjs
