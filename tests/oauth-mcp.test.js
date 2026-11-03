@@ -58,7 +58,7 @@ test('OAuth PKCE, refresh, scoped MCP access and revocation',async t=>{
  const forged=await call('/oauth/authorize',{method:'POST',headers:{cookie:authCookie,'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({...fields,state:'forged-state'})});
  assert.equal(forged.status,403,'Changing OAuth state must invalidate the signed consent');
  const response=await call('/oauth/authorize',{method:'POST',headers:{cookie:authCookie,'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(fields)});
- assert.ok(rateCalls.some(args=>JSON.stringify(args).includes('oauth-consent:')),'OAuth approval must invoke consent rate limiting');
+ assert.ok(rateCalls.some(args=>args.p_max===20&&args.p_window===3600000),'OAuth approval must invoke consent rate limiting');
  assert.equal(response.status,302);const returned=new URL(response.headers.get('location'));assert.equal(returned.searchParams.get('iss'),'https://web-ga-demo.onrender.com');const code=returned.searchParams.get('code');assert.ok(code);
  const token=await call('/oauth/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({grant_type:'authorization_code',code,code_verifier:verifier,client_id:client.client_id,redirect_uri:'https://chatgpt.com/oauth/callback',resource})});
  assert.equal(token.status,200);const creds=await token.json();
