@@ -71,7 +71,7 @@ async function oauthRoutes({req,res,p,method,url,store,current,origin,rate}){
   go.searchParams.set('code',code);res.writeHead(302,{Location:go.toString(),'Cache-Control':'no-store'});res.end();return true;
  }
  if(p==='/oauth/token'&&method==='POST'){
-  const b=await body(req,true),cid=String(b.client_id||'');const client=await findClient(cid);if(!client)problem(401,'Unknown OAuth client.');
+  const b=await body(req,true),cid=String(b.client_id||'');console.info('Forma OAuth token exchange attempted', {grant:b.grant_type||'missing',hasClient:!!cid,hasVerifier:!!b.code_verifier,hasCode:!!b.code,hasResource:!!b.resource});const client=await findClient(cid);if(!client)problem(401,'Unknown OAuth client.');
   if(b.resource&&b.resource!==resource)problem(400,'Invalid OAuth resource audience.');
   if(b.grant_type==='authorization_code'){
    const redirect=String(b.redirect_uri||''),verifier=String(b.code_verifier||''),code=String(b.code||'');
@@ -79,9 +79,10 @@ async function oauthRoutes({req,res,p,method,url,store,current,origin,rate}){
    const challenge=crypto.createHash('sha256').update(verifier).digest('base64url');
    const verified=await store.rpc('forma_oauth_consume_code',{p_hash:hash(code),p_client_id:cid,p_redirect_uri:redirect,p_challenge:challenge,p_now:Date.now()});
    if(!verified?.user_id)problem(400,'Authorization code expired or invalid.');
+   console.info('Forma OAuth authorization code consumed');
    const access=random(),refresh=random(),now=Date.now();
    await store.rest('forma_oauth_tokens','','POST',{access_hash:hash(access),refresh_hash:hash(refresh),client_id:cid,user_id:verified.user_id,scopes:verified.scopes,expires:now+3600000,refresh_expires:now+2592000000,created:now});
-   response(res,200,{access_token:access,refresh_token:refresh,token_type:'Bearer',expires_in:3600,scope:verified.scopes});return true;
+   console.info('Forma OAuth access token issued');response(res,200,{access_token:access,refresh_token:refresh,token_type:'Bearer',expires_in:3600,scope:verified.scopes});return true;
   }
   if(b.grant_type==='refresh_token'){
    const previous=String(b.refresh_token||'');
