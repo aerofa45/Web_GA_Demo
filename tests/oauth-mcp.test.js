@@ -36,7 +36,7 @@ test('OAuth PKCE, refresh, scoped MCP access and revocation',async t=>{
   if(method==='DELETE'){tables[table]=tables[table].filter(x=>!matches(x));return null}
   return structuredClone(rows).map(row=>p.has('select')&&p.get('select')!=='*'?Object.fromEntries(p.get('select').split(',').map(k=>[k,row[k]])):row);
  }};
- const server=http.createServer(createApp(store,{origin:'https://web-ga-demo.onrender.com'}));await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+ const server=http.createServer(createApp(store,{origin:'https://web-ga-demo.onrender.com',fetcher:async url=>{if(String(url).startsWith('https://api.stripe.com/v1/checkout/sessions?payment_intent='))return {ok:true,json:async()=>({data:[{id:'cs_test_refund_fixture',livemode:false}]})};throw Error('Unexpected outbound request: '+url)}}));await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
  t.after(()=>{server.closeAllConnections();server.close()});
  const base='http://127.0.0.1:'+server.address().port;
  const call=(url,options={})=>fetch(base+url,{redirect:'manual',...options});
@@ -54,6 +54,15 @@ test('OAuth PKCE, refresh, scoped MCP access and revocation',async t=>{
  const expiredBody=JSON.stringify({id:'evt_expired_fixture',type:'checkout.session.expired',data:{object:{id:'cs_test_expired_fixture',livemode:false}}});
  const expiredSig=crypto.createHmac('sha256',process.env.STRIPE_TEST_WEBHOOK_SECRET).update(ts+'.'+expiredBody).digest('hex');
  const expired=await call('/api/stripe-test/webhook',{method:'POST',headers:{'stripe-signature':'t='+ts+',v1='+expiredSig},body:expiredBody});assert.equal(expired.status,200);assert.equal(pendingOrder.status,'expired');
+ tables.forma_course_enrollments=[{course_id:cid,email:'owner@example.test',status:'approved',created:Date.now(),updated:Date.now()}];
+ tables.forma_drive_video_grants=[];
+ tables.forma_test_orders.push({id:'9'.repeat(48),course_id:cid,student_id:uid,amount_cents:500,currency:'usd',checkout_session_id:'cs_test_refund_fixture',status:'paid',created:Date.now(),paid_at:Date.now()});
+ const refundBody=JSON.stringify({id:'evt_refund_fixture',type:'charge.refunded',data:{object:{livemode:false,payment_intent:'pi_refund_fixture',refunded:true}}});
+ const refundSig=crypto.createHmac('sha256',process.env.STRIPE_TEST_WEBHOOK_SECRET).update(ts+'.'+refundBody).digest('hex');
+ const refunded=await call('/api/stripe-test/webhook',{method:'POST',headers:{'stripe-signature':'t='+ts+',v1='+refundSig},body:refundBody});
+ assert.equal(refunded.status,200,'Signed refund must be processed');
+ assert.equal(tables.forma_test_orders.find(x=>x.checkout_session_id==='cs_test_refund_fixture').status,'refunded');
+ assert.equal(tables.forma_course_enrollments[0].status,'revoked','Refund must revoke enrolled course access');
  const staleTs=ts-3600,staleSignature=crypto.createHmac('sha256',process.env.STRIPE_TEST_WEBHOOK_SECRET).update(staleTs+'.'+payload).digest('hex');
  const staleStripe=await call('/api/stripe-test/webhook',{method:'POST',headers:{'stripe-signature':'t='+staleTs+',v1='+staleSignature},body:payload});assert.equal(staleStripe.status,400,'Expired webhook signatures must be rejected');
  const authCookie='forma_session='+cookie;
