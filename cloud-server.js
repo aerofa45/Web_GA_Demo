@@ -263,6 +263,45 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
         }
         // Authenticated portfolio editing interface for future AI integrations.
         // Preview never writes; save requires explicit confirmation from the caller.
+        // Structured assistant editing API. All writes require owner authentication and confirmation.
+        if(p==='/api/course-edit'&&method==='POST'){
+          const user=await auth(req);await rate(req,'course-assistant:'+user.id,60);
+          const b=await read(req),courseId=String(b.courseId||''),operation=String(b.operation||'');
+          if(!/^[a-f0-9]{48}$/.test(courseId))throw new HttpError(400,'Valid course ID required.');
+          const rows=await store.rest('forma_course_drafts','id='+eq(courseId)+'&user_id='+eq(user.id)+'&select=id,title,outline,published,updated&limit=1');
+          const course=rows[0];if(!course||course.outline?.archived)throw new HttpError(404,'Course not found.');
+          const outline=structuredClone(course.outline),chapterIndex=Number(b.chapterIndex),lessonIndex=Number(b.lessonIndex);
+          const chapter=outline.chapters[chapterIndex],lesson=chapter?.lessons?.[lessonIndex];
+          let title=course.title;
+          if(operation==='rename-course'){title=clean(b.title,140);if(!title)throw new HttpError(400,'Course title required.');}
+          else if(operation==='add-chapter'){
+            if(!clean(b.title,180))throw new HttpError(400,'Chapter title required.');
+            outline.chapters.push({title:clean(b.title,180),lessons:[]});
+          }else if(operation==='rename-chapter'){
+            if(!chapter||!clean(b.title,180))throw new HttpError(400,'Chapter and title required.');
+            chapter.title=clean(b.title,180);
+          }else if(operation==='add-lesson'){
+            if(!chapter)throw new HttpError(400,'Choose a chapter.');
+            const item={type:'text',title:clean(b.title,180),content:clean(b.content,20000)};
+            if(!item.title)throw new HttpError(400,'Lesson title required.');
+            chapter.lessons.push(item);
+          }else if(operation==='edit-lesson'){
+            if(!lesson)throw new HttpError(400,'Choose a lesson.');
+            if(b.title!==undefined){lesson.title=clean(b.title,180);if(!lesson.title)throw new HttpError(400,'Lesson title required.');}
+            if(b.content!==undefined)lesson.content=clean(b.content,20000);
+          }else if(operation==='remove-lesson'){
+            if(!lesson)throw new HttpError(400,'Choose a lesson.');
+            chapter.lessons.splice(lessonIndex,1);
+          }else throw new HttpError(400,'Unsupported course edit action.');
+          try{validateOutline(outline);}catch{throw new HttpError(400,'Invalid course content or size.');}
+          if(JSON.stringify(outline).length>240000)throw new HttpError(413,'Course too large.');
+          const proposed={title,outline};
+          if(b.confirm!==true)return json(res,200,{preview:true,operation,courseId,proposed,note:'Preview only. Confirm to save.'});
+          if(!Number.isSafeInteger(b.expectedUpdated)||b.expectedUpdated!==Number(course.updated))throw new HttpError(409,'Course changed since preview. Refresh before saving.');
+          // Write only this instructor's course; preserve publication and other metadata.
+          await store.rest('forma_course_drafts','id='+eq(courseId)+'&user_id='+eq(user.id)+'&updated='+eq(course.updated),'PATCH',{title,outline,updated:Date.now()});
+          return json(res,200,{saved:true,courseId,operation,url:'/course/'+courseId});
+        }
         if(p==='/api/portfolio-edit'&&method==='POST'){
           const user=await auth(req);await rate(req,'portfolio-edit:'+user.id,60);
           const b=await read(req),section=String(b.section||''),operation=String(b.operation||'');
