@@ -171,7 +171,9 @@ async function oauthRoutes({req,res,p,method,url,store,current,origin,rate}){
   }
   if(['preview_assessment_batch','create_assessment_batch'].includes(name)&&scopes.includes('course:write')){
    if(!await instructor()){error(-32003,'Instructor role required.');return true}
-   const owned=await courseOwned(args.courseId);
+   if(!/^[a-f0-9]{48}$/.test(String(args.courseId||''))){error(-32602,'Invalid course ID.');return true}
+   const owned=(await store.rest('forma_course_drafts','id='+eq(args.courseId)+'&user_id='+eq(userId)+'&select=id,title,outline,published,updated&limit=1'))[0];
+   if(!owned||owned.outline?.archived){error(-32004,'Course not found or not owned by connected account.');return true}
    let proposed;
    try{proposed=validateAssessments(args.assessments)}catch{error(-32602,'Invalid assignments or quiz content.');return true}
    const previewHash=checksum({courseId:owned.id,assessments:proposed});
