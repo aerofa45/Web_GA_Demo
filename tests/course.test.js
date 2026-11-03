@@ -7,7 +7,16 @@ const valid=()=>({chapters:[{title:'Chapter',lessons:[{title:'Lesson',type:'text
 async function setup(t,options={}){
  const tables={forma_sessions:[{tokenhash:crypto.createHash('sha256').update(token).digest('hex'),expires:Date.now()+60000,user_id:uid}],forma_users:[{id:uid,email:'teacher@example.com'}],forma_course_drafts:[{id:cid,user_id:uid,title:'Original',outline:valid(),updated:1}],forma_course_files:[{id:pid,user_id:uid,course_id:cid,object_key:'private.pdf'}],forma_course_enrollments:[],forma_drive_video_grants:[],forma_google_connections:[],forma_assignments:[],forma_submissions:[],forma_quizzes:[],forma_quiz_attempts:[],forma_lesson_progress:[],forma_submission_files:[],forma_attendance:[],forma_notifications:[],forma_course_subscription_prices:[],forma_test_subscriptions:[],forma_account_roles:[{user_id:uid,role:'instructor'}],forma_assistant_audit:[],forma_assistant_versions:[],forma_profiles:[{user_id:uid,data:{name:'Teacher',experience:[],education:[],research:[],projects:[],publications:[]},updated:1}]};
  const state={calls:[],rates:0,reply:()=>new Response(JSON.stringify({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(valid())}]}}]})),pdf:Buffer.from('%PDF-1.4 fixture')};
- const store={url:'https://example.supabase.co',key:'fixture',async rpc(name,args){state.rates++;if(name==='forma_assistant_commit'){
+ const store={url:'https://example.supabase.co',key:'fixture',async rpc(name,args){state.rates++;if(name==='forma_assistant_add_assessments'){
+   const owned=tables.forma_course_drafts.find(x=>x.id===args.p_course_id&&x.user_id===args.p_user_id&&!x.outline?.archived);
+   if(!owned)return {saved:false};
+   if(tables.forma_assistant_audit.some(x=>x.id===args.p_audit_id))return {saved:true,replayed:true};
+   tables.forma_assignments.push(...structuredClone(args.p_assignments));
+   tables.forma_quizzes.push(...structuredClone(args.p_quizzes));
+   tables.forma_assistant_audit.push({id:args.p_audit_id,user_id:args.p_user_id,operation:'add-generated-assessments'});
+   return {saved:true,assignments:args.p_assignments.length,quizzes:args.p_quizzes.length};
+  }
+  if(name==='forma_assistant_commit'){
    const target=name&&args.p_domain==='course'?tables.forma_course_drafts.find(x=>x.id===args.p_resource_id&&x.user_id===args.p_user_id):null;
    if(!target||target.updated!==args.p_expected_updated)return {saved:false,conflict:true};
    tables.forma_assistant_versions.push({id:args.p_version_id,user_id:args.p_user_id,domain:'course',resource_id:target.id,created:args.p_now,previous:{title:target.title,outline:structuredClone(target.outline)}});
@@ -285,4 +294,41 @@ test('student cannot save generated courses or read and restore instructor snaps
  assert.equal((await req('/api/assistant/course-generation/commit',{courseId:cid,title:'Not mine',outline:valid(),expectedUpdated:1})).status,403);
  assert.equal((await req('/api/assistant/version/'+'f'.repeat(48),undefined,true,'GET')).status,404);
  assert.equal((await req('/api/assistant/restore',{versionId:'f'.repeat(48),expectedUpdated:1,confirm:true})).status,404);
+});
+
+test('assessment validator accepts bounded questions and rejects unsafe shapes',()=>{
+ const {validateAssessments}=require('../assessment');
+ const validInput={assignments:[{title:' Unit A ',instructions:' Analyze example data. '}],quizzes:[{title:'Review',questions:[{prompt:'2+2?',options:['3','4'],correct:1}]}]};
+ assert.deepEqual(validateAssessments(validInput).quizzes[0].questions[0].options,['3','4']);
+ assert.throws(()=>validateAssessments({assignments:[],quizzes:[]}));
+ assert.throws(()=>validateAssessments({assignments:[],quizzes:[{title:'Q',questions:[{prompt:'X',options:['A','B'],correct:2}]}]}));
+ assert.throws(()=>validateAssessments({assignments:[{title:'A',instructions:'B'}],quizzes:[{title:'Q',questions:[{prompt:'X',options:['A','B'],correct:'1'}]}]}));
+ assert.throws(()=>validateAssessments({assignments:Array(5).fill({title:'A',instructions:'B'}),quizzes:[]}));
+});
+test('AI assessment preview never persists and confirmed save is idempotent and access-scoped',async t=>{
+ const {req,state,tables}=await setup(t);
+ const source={assignments:[{title:'Practice assignment',instructions:'Use Bayes theorem to solve a numerical problem.'}],quizzes:[{title:'Probability quiz',questions:[{prompt:'Which is a probability?',options:['-1','0.5','2'],correct:1}]}]};
+ state.reply=()=>new Response(JSON.stringify({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(source)}]}}]}));
+ const route='/api/assistant/assessment-generation',notes='Detailed probability distribution and Bayes theorem concepts. '.repeat(3);
+ assert.equal((await req(route,{courseId:cid,notes},false)).status,401);
+ const preview=await req(route,{courseId:cid,notes});assert.equal(preview.status,200);
+ assert.equal(preview.body.assessments.assignments.length,1);
+ assert.equal(tables.forma_assignments.length,0);
+ assert.equal(tables.forma_quizzes.length,0);
+ const commitRoute=route+'/commit',payload={courseId:cid,assessments:preview.body.assessments,previewToken:preview.body.previewToken,confirm:true};
+ assert.equal((await req(commitRoute,{...payload,confirm:false})).status,400);
+ assert.equal((await req(commitRoute,{...payload,previewToken:'f'.repeat(64)})).status,409);
+ const ok=await req(commitRoute,payload);assert.equal(ok.status,200);assert.equal(ok.body.saved,true);
+ assert.equal(tables.forma_assignments.length,1);assert.equal(tables.forma_quizzes.length,1);
+ const replay=await req(commitRoute,payload);assert.equal(replay.status,200);assert.equal(replay.body.replayed,true);
+ assert.equal(tables.forma_assignments.length,1);assert.equal(tables.forma_quizzes.length,1);
+ tables.forma_users.push({id:'b'.repeat(48),email:'student@example.com'});tables.forma_sessions[0].user_id='b'.repeat(48);
+ assert.equal((await req(route,{courseId:cid,notes})).status,403);
+ assert.equal((await req(commitRoute,payload)).status,403);
+});
+test('generation confirmation rejects published courses without unpublishing',async t=>{
+ const {req,tables}=await setup(t);
+ tables.forma_course_drafts[0].published=true;
+ assert.equal((await req('/api/assistant/course-generation/commit',{courseId:cid,title:'Generated',outline:valid(),expectedUpdated:1})).status,409);
+ assert.equal(tables.forma_course_drafts[0].title,'Original');
 });
