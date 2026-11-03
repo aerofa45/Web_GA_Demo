@@ -23,7 +23,7 @@ async function oauthRoutes({req,res,p,method,url,store,current,origin,rate}){
  const site=siteOrigin(origin),issuer=site,resource=site+'/mcp';
  const findClient=async cid=>(await store.rest('forma_oauth_clients','client_id='+eq(cid)+'&select=client_id,client_name,redirect_uris&limit=1'))[0];
  if(p==='/.well-known/oauth-protected-resource'&&method==='GET'){response(res,200,{resource,authorization_servers:[issuer],scopes_supported:knownScopes,bearer_methods_supported:['header']});return true}
- if(p==='/.well-known/oauth-authorization-server'&&method==='GET'){response(res,200,{issuer,authorization_endpoint:site+'/oauth/authorize',token_endpoint:site+'/oauth/token',registration_endpoint:site+'/oauth/register',response_types_supported:['code'],grant_types_supported:['authorization_code','refresh_token'],token_endpoint_auth_methods_supported:['none'],code_challenge_methods_supported:['S256'],scopes_supported:knownScopes});return true}
+ if(p==='/.well-known/oauth-authorization-server'&&method==='GET'){response(res,200,{issuer,authorization_endpoint:site+'/oauth/authorize',token_endpoint:site+'/oauth/token',registration_endpoint:site+'/oauth/register',response_types_supported:['code'],grant_types_supported:['authorization_code','refresh_token'],token_endpoint_auth_methods_supported:['none'],code_challenge_methods_supported:['S256'],authorization_response_iss_parameter_supported:true,scopes_supported:knownScopes});return true}
  if(p==='/oauth/register'&&method==='POST'){
   await rate(req,'oauth-register',15,3600000);
   const b=await body(req),uris=b.redirect_uris;
@@ -54,7 +54,7 @@ async function oauthRoutes({req,res,p,method,url,store,current,origin,rate}){
   const match=String(req.headers.cookie||'').match(/(?:^|;\s*)forma_oauth_consent=([A-Za-z0-9_-]+)/);
   if(!match||match[1]!==b.nonce)problem(403,'OAuth consent expired. Reopen authorization.');
   res.setHeader('Set-Cookie','forma_oauth_consent=; Path=/oauth/authorize; HttpOnly; Secure; SameSite=Lax; Max-Age=0');
-  const go=new URL(redirect);go.searchParams.set('state',b.state);
+  const go=new URL(redirect);go.searchParams.set('state',b.state);go.searchParams.set('iss',issuer);
   if(b.decision!=='approve'){go.searchParams.set('error','access_denied');res.writeHead(302,{Location:go.toString(),'Cache-Control':'no-store'});res.end();return true}
   await rate(req,'oauth-consent:'+user.id,20,3600000);
   const code=random();await store.rest('forma_oauth_codes','','POST',{code_hash:hash(code),client_id:cid,user_id:user.id,redirect_uri:redirect,challenge:b.code_challenge,scopes,expires:Date.now()+300000,created:Date.now()});
@@ -62,6 +62,7 @@ async function oauthRoutes({req,res,p,method,url,store,current,origin,rate}){
  }
  if(p==='/oauth/token'&&method==='POST'){
   const b=await body(req,true),cid=String(b.client_id||'');const client=await findClient(cid);if(!client)problem(401,'Unknown OAuth client.');
+  if(b.resource&&b.resource!==resource)problem(400,'Invalid OAuth resource audience.');
   if(b.grant_type==='authorization_code'){
    const redirect=String(b.redirect_uri||''),verifier=String(b.code_verifier||''),code=String(b.code||'');
    if(!clientRedirect(client,redirect)||!/^[A-Za-z0-9._~-]{43,128}$/.test(verifier)||!/^[A-Za-z0-9_-]{20,100}$/.test(code))problem(400,'Invalid authorization code request.');
