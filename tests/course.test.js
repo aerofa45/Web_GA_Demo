@@ -333,3 +333,16 @@ test('generation confirmation rejects published courses without unpublishing',as
  assert.equal((await req('/api/assistant/course-generation/commit',{courseId:cid,title:'Generated',outline:valid(),expectedUpdated:1,confirm:true})).status,409);
  assert.equal(tables.forma_course_drafts[0].title,'Original');
 });
+
+test('assistant interpretation receives bounded conversation history without saving changes',async t=>{
+ const {req,state,tables}=await setup(t);
+ state.reply=()=>new Response(JSON.stringify({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify({section:'experience',operation:'add',entry:{title:'Research assistant',subtitle:'',description:'ECG work'}})}]}}]}));
+ const history=Array.from({length:12},(_,i)=>({role:i%2?'assistant':'user',content:'Earlier message '+i}));
+ const result=await req('/api/assistant/interpret',{domain:'portfolio',request:'Add a research assistant role to my portfolio.',history});
+ assert.equal(result.status,200);assert.equal(result.body.suggestion.operation,'add');
+ const upstream=JSON.parse(state.calls.at(-1).options.body).contents[0].parts[0].text;
+ assert.match(upstream,/Earlier message 11/);
+ assert.doesNotMatch(upstream,/Earlier message 0/);
+ assert.equal(tables.forma_assistant_versions.length,0);
+ assert.equal(tables.forma_assistant_audit.length,0);
+});
