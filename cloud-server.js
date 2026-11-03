@@ -99,6 +99,40 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
       await store.rest('forma_drive_video_grants','course_id='+eq(courseId)+'&email='+eq(grant.email)+'&file_id='+eq(grant.file_id),'DELETE');
     }
   }
+  async function hasPaidCourseAccess(courseId,studentId){
+    const [orders,subscriptions]=await Promise.all([
+      store.rest('forma_test_orders','course_id='+eq(courseId)+'&student_id='+eq(studentId)+'&status=eq.paid&select=id&limit=1'),
+      store.rest('forma_test_subscriptions','course_id='+eq(courseId)+'&student_id='+eq(studentId)+'&status=eq.active&select=id&limit=1')
+    ]);
+    return orders.length>0||subscriptions.length>0;
+  }
+  async function reconcilePaidCourseAccess(courseId,studentId){
+    // A refund/cancellation must not remove another still-valid paid entitlement.
+    if(await hasPaidCourseAccess(courseId,studentId))return;
+    const students=await store.rest('forma_users','id='+eq(studentId)+'&select=email&limit=1');
+    const email=students[0]?.email?.toLowerCase();if(!email)return;
+    const enrolled=await store.rest('forma_course_enrollments','course_id='+eq(courseId)+'&email='+eq(email)+'&select=status&limit=1');
+    if(enrolled[0]?.status==='approved')await store.rest('forma_course_enrollments','course_id='+eq(courseId)+'&email='+eq(email)+'&status=eq.approved','PATCH',{status:'revoked',updated:Date.now()});
+    const grants=await store.rest('forma_drive_video_grants','course_id='+eq(courseId)+'&email='+eq(email)+'&select=file_id,permission_id');
+    if(!grants.length)return;
+    const courses=await store.rest('forma_course_drafts','id='+eq(courseId)+'&select=user_id&limit=1');
+    const instructorId=courses[0]?.user_id;
+    const connections=instructorId?await store.rest('forma_google_connections','user_id='+eq(instructorId)+'&role=eq.instructor&select=refresh_cipher&limit=1'):[];
+    if(!connections.length)throw new HttpError(502,'Paid access revoked; instructor Google Drive connection needed to remove shared files.');
+    const tokens=await googleToken({client_id:process.env.GOOGLE_CLIENT_ID,client_secret:process.env.GOOGLE_CLIENT_SECRET,refresh_token:decryptGoogle(connections[0].refresh_cipher),grant_type:'refresh_token'});
+    if(!tokens.access_token)throw new HttpError(502,'Paid access revoked; Google token refresh failed.');
+    for(const grant of grants){
+      const otherGrants=await store.rest('forma_drive_video_grants','file_id='+eq(grant.file_id)+'&email='+eq(email)+'&select=course_id');
+      if(otherGrants.some(g=>g.course_id!==courseId)){
+        await store.rest('forma_drive_video_grants','course_id='+eq(courseId)+'&email='+eq(email)+'&file_id='+eq(grant.file_id),'DELETE');
+        continue;
+      }
+      const endpoint='https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(grant.file_id)+'/permissions/'+encodeURIComponent(grant.permission_id);
+      const removed=await fetcher(endpoint,{method:'DELETE',headers:{Authorization:'Bearer '+tokens.access_token},signal:AbortSignal.timeout(15000)});
+      if(!removed.ok&&removed.status!==404)throw new HttpError(502,'Paid access revoked; Google Drive permission removal failed and requires retry.');
+      await store.rest('forma_drive_video_grants','course_id='+eq(courseId)+'&email='+eq(email)+'&file_id='+eq(grant.file_id),'DELETE');
+    }
+  }
   return async function handler(req,res){
     res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','strict-origin-when-cross-origin');
     res.setHeader('X-Frame-Options','DENY');
@@ -123,7 +157,7 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
         const expected=crypto.createHmac('sha256',secret).update(timestamp+'.').update(raw).digest('hex');
         if(!signatures.some(sig=>crypto.timingSafeEqual(Buffer.from(sig,'hex'),Buffer.from(expected,'hex'))))throw new HttpError(400,'Invalid webhook signature.');
         const event=JSON.parse(raw.toString());
-        if(event.type==='checkout.session.completed'&&event.data?.object?.mode==='subscription'){
+        if(['checkout.session.completed','checkout.session.async_payment_succeeded'].includes(event.type)&&event.data?.object?.mode==='subscription'){
           const session=event.data.object;
           if(session.livemode!==false||!/^sub_/.test(session.subscription||'')||session.payment_status!=='paid')return json(res,200,{received:true});
           const rows=await store.rest('forma_test_subscriptions','checkout_session_id='+eq(session.id)+'&status=eq.pending&select=id,amount_cents,currency&limit=1');
@@ -136,10 +170,19 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
         if(['customer.subscription.deleted','customer.subscription.updated'].includes(event.type)){
           const subscription=event.data?.object;
           if(subscription?.livemode!==false||!/^sub_/.test(subscription.id||''))return json(res,200,{received:true});
-          const rows=await store.rest('forma_test_subscriptions','stripe_subscription_id='+eq(subscription.id)+'&select=id,status&limit=1');
+          const rows=await store.rest('forma_test_subscriptions','stripe_subscription_id='+eq(subscription.id)+'&select=id,status,course_id,student_id&limit=1');
           if(!rows.length)return json(res,200,{received:true});
-          const status=event.type==='customer.subscription.deleted'?'canceled':(['active','past_due','unpaid','canceled'].includes(subscription.status)?subscription.status:'pending');
+          let latest=subscription;
+          if(event.type==='customer.subscription.updated'){
+            // Delivery order is not guaranteed; read current Stripe state before changing access.
+            const response=await fetcher('https://api.stripe.com/v1/subscriptions/'+encodeURIComponent(subscription.id),{headers:{Authorization:'Bearer '+key},signal:AbortSignal.timeout(15000)});
+            if(!response.ok)throw new HttpError(502,'Unable to verify current test subscription.');
+            latest=await response.json();
+            if(latest.livemode!==false||latest.id!==subscription.id)throw new HttpError(502,'Stripe did not return the expected test subscription.');
+          }
+          const status=event.type==='customer.subscription.deleted'?'canceled':(['active','past_due','unpaid','canceled'].includes(latest.status)?latest.status:'pending');
           await store.rest('forma_test_subscriptions','id='+eq(rows[0].id),'PATCH',{status,updated:Date.now()});
+          if(status!=='active')await reconcilePaidCourseAccess(rows[0].course_id,rows[0].student_id);
           return json(res,200,{received:true});
         }
         if(['checkout.session.expired','checkout.session.async_payment_failed'].includes(event.type)){
@@ -162,31 +205,7 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
               const orderDetails=await store.rest('forma_test_orders','id='+eq(rows[0].id)+'&select=id,course_id,student_id,status&limit=1');
               const order=orderDetails[0];if(!order)continue;
               await store.rest('forma_test_orders','id='+eq(order.id)+'&status=eq.paid','PATCH',{status:'refunded'});
-              const otherPaid=await store.rest('forma_test_orders','course_id='+eq(order.course_id)+'&student_id='+eq(order.student_id)+'&status=eq.paid&select=id&limit=1');
-              if(otherPaid.length)continue;
-              const students=await store.rest('forma_users','id='+eq(order.student_id)+'&select=email&limit=1');
-              const email=students[0]?.email?.toLowerCase();if(!email)continue;
-              const enrolled=await store.rest('forma_course_enrollments','course_id='+eq(order.course_id)+'&email='+eq(email)+'&select=status&limit=1');
-              if(enrolled[0]?.status==='approved')await store.rest('forma_course_enrollments','course_id='+eq(order.course_id)+'&email='+eq(email)+'&status=eq.approved','PATCH',{status:'revoked',updated:Date.now()});
-              const grants=await store.rest('forma_drive_video_grants','course_id='+eq(order.course_id)+'&email='+eq(email)+'&select=file_id,permission_id');
-              if(!grants.length)continue;
-              const courses=await store.rest('forma_course_drafts','id='+eq(order.course_id)+'&select=user_id&limit=1');
-              const instructorId=courses[0]?.user_id;
-              const connections=instructorId?await store.rest('forma_google_connections','user_id='+eq(instructorId)+'&role=eq.instructor&select=refresh_cipher&limit=1'):[];
-              if(!connections.length)throw new HttpError(502,'Refund entitlement revoked; instructor Google Drive connection needed to remove shared files.');
-              const tokens=await googleToken({client_id:process.env.GOOGLE_CLIENT_ID,client_secret:process.env.GOOGLE_CLIENT_SECRET,refresh_token:decryptGoogle(connections[0].refresh_cipher),grant_type:'refresh_token'});
-              if(!tokens.access_token)throw new HttpError(502,'Refund entitlement revoked; Google token refresh failed.');
-              for(const grant of grants){
-                const otherGrants=await store.rest('forma_drive_video_grants','file_id='+eq(grant.file_id)+'&email='+eq(email)+'&select=course_id');
-                if(otherGrants.some(g=>g.course_id!==order.course_id)){
-                  await store.rest('forma_drive_video_grants','course_id='+eq(order.course_id)+'&email='+eq(email)+'&file_id='+eq(grant.file_id),'DELETE');
-                  continue;
-                }
-                const endpoint='https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(grant.file_id)+'/permissions/'+encodeURIComponent(grant.permission_id);
-                const removed=await fetcher(endpoint,{method:'DELETE',headers:{Authorization:'Bearer '+tokens.access_token},signal:AbortSignal.timeout(15000)});
-                if(!removed.ok&&removed.status!==404)throw new HttpError(502,'Refund entitlement revoked; Google Drive permission removal failed and requires retry.');
-                await store.rest('forma_drive_video_grants','course_id='+eq(order.course_id)+'&email='+eq(email)+'&file_id='+eq(grant.file_id),'DELETE');
-              }
+              await reconcilePaidCourseAccess(order.course_id,order.student_id);
             }
           }
           return json(res,200,{received:true,notice:'Refund processed; paid entitlement revoked and private Drive grants reconciled.'});
@@ -726,11 +745,11 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
             if(!enrolled.length)throw new HttpError(404,'No enrollment request for this email.');
             if(decision==='approve'){
               const priceRows=await store.rest('forma_course_prices','course_id='+eq(courseId)+'&enabled=eq.true&select=amount_cents&limit=1');
-              if(priceRows.length){
+              const subscriptionPrices=await store.rest('forma_course_subscription_prices','course_id='+eq(courseId)+'&enabled=eq.true&select=amount_cents&limit=1');
+              if(priceRows.length||subscriptionPrices.length){
                 const paidStudents=await store.rest('forma_users','email='+eq(email)+'&select=id&limit=1');
                 if(!paidStudents.length)throw new HttpError(403,'Student account required for paid enrollment.');
-                const payments=await store.rest('forma_test_orders','course_id='+eq(courseId)+'&student_id='+eq(paidStudents[0].id)+'&status=eq.paid&select=id&limit=1');
-                if(!payments.length)throw new HttpError(402,'A verified test payment is required before approving paid course access.');
+                if(!await hasPaidCourseAccess(courseId,paidStudents[0].id))throw new HttpError(402,'A verified test payment or active subscription is required before approving paid course access.');
               }
             }
             if(decision==='approve'){
@@ -917,7 +936,7 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
             const b=await body(),quizId=String(b.quizId||''),answers=b.answers;
             const quizzes=await store.rest('forma_quizzes','id='+eq(quizId)+'&course_id='+eq(courseId)+'&select=questions,max_attempts,due_at&limit=1');
             const q=quizzes[0];
-            if(!q||!Array.isArray(answers)||answers.length!==q.questions.length||answers.some(a=>!Number.isInteger(a)))throw new HttpError(400,'Invalid quiz attempt.');
+            if(!q||!Array.isArray(answers)||answers.length!==q.questions.length||answers.some((a,i)=>!Number.isInteger(a)||a<0||a>=q.questions[i].options.length))throw new HttpError(400,'Invalid quiz attempt.');
             if(q.due_at!==null&&now>Number(q.due_at))throw new HttpError(409,'Quiz deadline passed.');
             const old=await store.rest('forma_quiz_attempts','quiz_id='+eq(quizId)+'&student_id='+eq(user.id)+'&select=id');
             if(old.length>=q.max_attempts)throw new HttpError(409,'Maximum attempts reached.');

@@ -472,3 +472,70 @@ test('approved student submits, receives grade, takes a quiz and persists isolat
  assert.equal((await req(root+'submissions',undefined,true,'GET')).body.submissions.length,0);
  assert.equal((await req(root+'progress',undefined,true,'GET')).body.progress.length,0);
 });
+
+test('subscription-priced enrollment requires an active verified payment before approval',async t=>{
+ const {tables,req}=await setup(t);const student=studentFixture(tables);tables.forma_course_subscription_prices.push({course_id:cid,enabled:true,amount_cents:500});
+ const route='/api/course-enrollments/'+cid+'/decision',decision={email:'student@example.com',decision:'approve'};
+ assert.equal((await req(route,decision)).status,402);
+ assert.equal(tables.forma_course_enrollments[0].status,'pending');
+ tables.forma_test_subscriptions.push({id:'f'.repeat(48),course_id:cid,student_id:student,status:'pending'});
+ assert.equal((await req(route,decision)).status,402);
+ tables.forma_test_subscriptions[0].status='active';assert.equal((await req(route,decision)).status,200);
+});
+test('subscription cancellation revokes LMS access and replay cannot restore it',async t=>{
+ providerEnvironment(t);const {tables,req,serverUrl,state}=await setup(t);const student=studentFixture(tables);tables.forma_course_enrollments[0].status='approved';
+ tables.forma_test_subscriptions.push({id:'f'.repeat(48),course_id:cid,student_id:student,stripe_subscription_id:'sub_fixture',status:'active'});
+ state.provider=async(url)=>{assert.match(url,/api.stripe.com\/v1\/subscriptions\/sub_fixture$/);return Response.json({id:'sub_fixture',livemode:false,status:'canceled'});};
+ const sub={id:'sub_fixture',livemode:false,status:'canceled'};
+ for(let n=0;n<2;n++)assert.equal((await webhook(serverUrl,'customer.subscription.deleted',sub)).status,200);
+ assert.equal(tables.forma_test_subscriptions[0].status,'canceled');assert.equal(tables.forma_course_enrollments[0].status,'revoked');
+ assert.equal((await webhook(serverUrl,'customer.subscription.updated',{...sub,status:'active'})).status,200,'stale active event must use current Stripe state');
+ assert.equal(tables.forma_test_subscriptions[0].status,'canceled');
+ tables.forma_sessions[0].user_id=student;assert.equal((await req('/api/lms/'+cid+'/gradebook',undefined,true,'GET')).status,403);
+});
+test('one-time refund retains enrollment while another subscription remains active',async t=>{
+ providerEnvironment(t);const {tables,state,serverUrl}=await setup(t);const student=studentFixture(tables);tables.forma_course_enrollments[0].status='approved';
+ tables.forma_test_orders.push({id:'f'.repeat(48),course_id:cid,student_id:student,checkout_session_id:'cs_test_fixture',status:'paid'});
+ tables.forma_test_subscriptions.push({id:'9'.repeat(48),course_id:cid,student_id:student,status:'active'});
+ state.provider=async()=>Response.json({data:[{id:'cs_test_fixture',livemode:false}]});
+ assert.equal((await webhook(serverUrl,'charge.refunded',{livemode:false,payment_intent:'pi_fixture',refunded:true})).status,200);
+ assert.equal(tables.forma_test_orders[0].status,'refunded');assert.equal(tables.forma_course_enrollments[0].status,'approved');
+});
+
+test('cancellation preserves a separate paid order and rejects live or unverifiable subscription state',async t=>{
+ providerEnvironment(t);const {tables,state,serverUrl}=await setup(t);const student=studentFixture(tables);tables.forma_course_enrollments[0].status='approved';
+ tables.forma_test_subscriptions.push({id:'f'.repeat(48),course_id:cid,student_id:student,stripe_subscription_id:'sub_fixture',status:'active'});
+ tables.forma_test_orders.push({id:'9'.repeat(48),course_id:cid,student_id:student,status:'paid'});
+ let response=()=>new Response('{}',{status:503});state.provider=async()=>response();
+ const sub={id:'sub_fixture',livemode:false,status:'canceled'};
+ assert.equal((await webhook(serverUrl,'customer.subscription.updated',sub)).status,502);assert.equal(tables.forma_test_subscriptions[0].status,'active');
+ response=()=>Response.json({...sub,livemode:true});assert.equal((await webhook(serverUrl,'customer.subscription.updated',sub)).status,502);
+ assert.equal(tables.forma_test_subscriptions[0].status,'active');
+ assert.equal((await webhook(serverUrl,'customer.subscription.deleted',sub)).status,200);assert.equal(tables.forma_test_subscriptions[0].status,'canceled');
+ assert.equal(tables.forma_course_enrollments[0].status,'approved');
+});
+test('asynchronous subscription payment validates totals and does not approve enrollment',async t=>{
+ providerEnvironment(t);const {tables,serverUrl}=await setup(t);const student=studentFixture(tables),subId='f'.repeat(48);
+ tables.forma_test_subscriptions.push({id:subId,course_id:cid,student_id:student,checkout_session_id:'cs_test_sub',status:'pending',amount_cents:500,currency:'usd'});
+ const paid={id:'cs_test_sub',mode:'subscription',subscription:'sub_fixture',livemode:false,payment_status:'paid',amount_total:500,currency:'usd',metadata:{order_id:subId}};
+ assert.equal((await webhook(serverUrl,'checkout.session.async_payment_succeeded',{...paid,amount_total:1})).status,400);
+ for(let n=0;n<2;n++)assert.equal((await webhook(serverUrl,'checkout.session.async_payment_succeeded',paid)).status,200);
+ assert.equal(tables.forma_test_subscriptions[0].status,'active');assert.equal(tables.forma_course_enrollments[0].status,'pending');
+});
+test('failed and expired checkout events change only matching pending orders',async t=>{
+ providerEnvironment(t);const {tables,serverUrl}=await setup(t);
+ tables.forma_test_orders.push({id:'1'.repeat(48),checkout_session_id:'cs_test_expired',status:'pending'},{id:'2'.repeat(48),checkout_session_id:'cs_test_failed',status:'pending'},{id:'3'.repeat(48),checkout_session_id:'cs_test_paid',status:'paid'});
+ assert.equal((await webhook(serverUrl,'checkout.session.expired',{id:'cs_test_expired',livemode:true})).status,200);assert.equal(tables.forma_test_orders[0].status,'pending');
+ assert.equal((await webhook(serverUrl,'checkout.session.expired',{id:'cs_test_expired',livemode:false})).status,200);
+ assert.equal((await webhook(serverUrl,'checkout.session.async_payment_failed',{id:'cs_test_failed',livemode:false})).status,200);
+ assert.equal((await webhook(serverUrl,'checkout.session.expired',{id:'cs_test_paid',livemode:false})).status,200);
+ assert.deepEqual(tables.forma_test_orders.map(x=>x.status),['expired','failed','paid']);
+});
+test('quiz answers must reference an available option and invalid attempts are never stored',async t=>{
+ const {tables,req}=await setup(t);const student=studentFixture(tables);tables.forma_course_enrollments[0].status='approved';
+ const quiz=await req('/api/lms/'+cid+'/quizzes',{title:'Bounds',questions:[{prompt:'Pick one',options:['A','B'],correct:0}],maxAttempts:2});
+ tables.forma_sessions[0].user_id=student;
+ for(const answer of [-1,2,1.5,'0'])assert.equal((await req('/api/lms/'+cid+'/attempts',{quizId:quiz.body.id,answers:[answer]})).status,400);
+ assert.equal(tables.forma_quiz_attempts.length,0);
+ assert.equal((await req('/api/lms/'+cid+'/attempts',{quizId:quiz.body.id,answers:[0]})).body.score,1);
+});

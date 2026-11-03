@@ -18,7 +18,7 @@ test('OAuth PKCE, refresh, scoped MCP access and revocation',async t=>{
   forma_profiles:[{user_id:uid,data:{name:'Instructor',bio:'Owner biography',experience:[],education:[],research:[],projects:[],publications:[]},updated:123}],
   forma_account_roles:[{user_id:uid,role:'instructor'}],
   forma_course_drafts:[{id:cid,user_id:uid,title:'My class',published:false,outline:{chapters:[]},updated:123},{id:'e'.repeat(48),user_id:other,title:'Private other class',published:false,outline:{chapters:[]},updated:123}],
-  forma_oauth_clients:[],forma_oauth_codes:[],forma_oauth_tokens:[],forma_assignments:[],forma_quizzes:[],forma_assistant_audit:[],forma_test_orders:[]
+  forma_oauth_clients:[],forma_oauth_codes:[],forma_oauth_tokens:[],forma_assignments:[],forma_quizzes:[],forma_assistant_audit:[],forma_test_orders:[],forma_test_subscriptions:[]
  };
  const store={key:'test-secret-key',url:'https://example.supabase.co',async rpc(name,args){
   if(name==='forma_limit'){rateCalls.push(args);return true;}
