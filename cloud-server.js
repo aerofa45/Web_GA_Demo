@@ -357,6 +357,7 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
           if(!/^[a-f0-9]{48}$/.test(courseId)||!Number.isSafeInteger(expected))throw new HttpError(400,'Select a valid course and preview version.');
           const rows=await store.rest('forma_course_drafts','id='+eq(courseId)+'&user_id='+eq(user.id)+'&select=id,title,outline,published,updated&limit=1');
           const course=rows[0];if(!course||course.outline?.archived)throw new HttpError(404,'Course not found.');
+          if(course.published)throw new HttpError(409,'Unpublish this course before replacing its generated outline.');
           const title=clean(b.title,140)||course.title,outline=b.outline;
           try{validateOutline(outline);}catch{throw new HttpError(400,'Generated course outline is invalid.');}
           if(!outline.chapters.length||JSON.stringify(outline).length>240000)throw new HttpError(400,'Generate at least one chapter within size limits.');
