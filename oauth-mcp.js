@@ -43,7 +43,7 @@ async function oauthRoutes({req,res,p,method,url,store,current,origin,rate}){
   const scopes=requiredScopes(b.scope);
   if(b.resource&&b.resource!==resource)problem(400,'Invalid OAuth resource.');
   const user=await current(req);
-  if(!user){res.writeHead(401,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store'});res.end('<!doctype html><html><body><h1>Sign in to Forma Studio</h1><p>Sign in to your account in another tab, then reopen this authorization page. No access has been granted.</p><a href="/login">Sign in</a></body></html>');return true}
+  if(!user){res.writeHead(401,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store'});res.end('<!doctype html><html><body><h1>Sign in to Forma Studio</h1><p>Sign in to your account in another tab, then reopen this authorization page. No access has been granted.</p><a href="/login?next='+encodeURIComponent('/oauth/authorize'+url.search)+'">Sign in</a></body></html>');return true}
   if(method==='GET'){
    const nonce=random();res.setHeader('Set-Cookie','forma_oauth_consent='+nonce+'; Path=/oauth/authorize; HttpOnly; Secure; SameSite=Lax; Max-Age=600');
    const escape=x=>String(x).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
