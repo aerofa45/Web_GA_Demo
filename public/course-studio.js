@@ -32,7 +32,17 @@ async function enrollments(){
 }
 el('enrollment-refresh').addEventListener('click',enrollments);
 async function load(id){const version=++loading,d=await api('/api/course-drafts/'+id);if(version!==loading)return;active=id;outline=d.course.outline||{chapters:[]};published=d.course.published;directPdf=null;el('material').value='';el('course-title').value=d.course.title;el('editor').hidden=false;publication();render();enrollments();window.dispatchEvent(new CustomEvent('forma:course-selected',{detail:{id}}));say('Editing '+d.course.title);}
-function publication(){el('publication').textContent=published?'Published publicly':'Private draft';el('publish').textContent=published?'Unpublish course':'Publish publicly';el('preview').href='/course/'+active;}
+const previewLink=el('preview');
+if(previewLink){
+ const picker=document.createElement('select');picker.id='course-preview-theme';picker.setAttribute('aria-label','Course preview theme');
+ for(const [value,label] of [['midnight','Midnight preview'],['daylight','Daylight preview'],['forest','Forest preview']]){
+  const option=document.createElement('option');option.value=value;option.textContent=label;picker.append(option);
+ }
+ const label=document.createElement('label');label.textContent='Preview design: ';label.htmlFor=picker.id;
+ previewLink.before(label,picker);
+ picker.addEventListener('change',()=>{if(active)previewLink.href='/course/'+active+'?theme='+encodeURIComponent(picker.value)});
+}
+function publication(){el('publication').textContent=published?'Published publicly':'Private draft';el('publish').textContent=published?'Unpublish course':'Publish publicly';el('preview').href='/course/'+active+'?theme='+encodeURIComponent(el('course-preview-theme')?.value||'midnight');}
 function sources(){const select=el('material'),old=select.value;select.replaceChildren();const notes=element('option','Typed notes only');notes.value='';select.append(notes);const uploadOption=element('option','Upload a new PDF for Gemini');uploadOption.value='upload';select.append(uploadOption);if(directPdf){const directOption=element('option','Uploaded PDF: '+directPdf.name);directOption.value='direct';select.append(directOption);}outline.chapters.forEach((c,i)=>c.lessons.forEach((l,j)=>{const o=element('option',c.title+' / '+l.title+(l.pdfId?' (PDF)':' (text)'));o.value=i+':'+j;select.append(o);}));select.value=old;if(select.selectedIndex<0)select.value='';}
 function input(tag,value,placeholder,change){const x=element(tag);x.value=value||'';x.placeholder=placeholder;x.setAttribute('aria-label',placeholder);x.addEventListener('input',()=>change(x.value));return x;}
 function render(){sources();
