@@ -106,13 +106,14 @@ async function oauthRoutes({req,res,p,method,url,store,current,origin,rate}){
   await store.rest('forma_oauth_tokens','user_id='+eq(user.id)+'&client_id='+eq(clientId),'DELETE');
   response(res,200,{revoked:true});return true;
  }
+ if(p==='/mcp')console.info('Forma MCP request',{method,hasBearer:/^Bearer /.test(String(req.headers.authorization||'')),accept:String(req.headers.accept||'').slice(0,120)});
  if(p==='/mcp'&&method==='POST'){
   const bearer=/^Bearer ([A-Za-z0-9_-]{20,100})$/.exec(String(req.headers.authorization||''));
   if(!bearer){response(res,401,{error:'OAuth authorization required.'},{'WWW-Authenticate':'Bearer resource_metadata="'+site+'/.well-known/oauth-protected-resource"'});return true}
   const tokens=await store.rest('forma_oauth_tokens','access_hash='+eq(hash(bearer[1]))+'&expires=gt.'+Date.now()+'&select=user_id,scopes&limit=1');
   if(!tokens.length){response(res,401,{error:'Invalid or expired OAuth token.'},{'WWW-Authenticate':'Bearer resource_metadata="'+site+'/.well-known/oauth-protected-resource"'});return true}
   const userId=tokens[0].user_id,scopes=String(tokens[0].scopes||'').split(' ');
-  const data=await body(req,false,300000),rpcId=data.id;
+  const data=await body(req,false,300000),rpcId=data.id;console.info('Forma MCP JSON-RPC method',{method:String(data.method||'missing').slice(0,80)});
   const success=result=>response(res,200,{jsonrpc:'2.0',id:rpcId,result});
   const error=(code,message)=>response(res,200,{jsonrpc:'2.0',id:rpcId,error:{code,message}});
   if(data.method==='initialize'){success({protocolVersion:'2025-06-18',capabilities:{tools:{}},serverInfo:{name:'Forma Studio',version:'0.1.0'}});return true}
