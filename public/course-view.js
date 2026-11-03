@@ -1,6 +1,20 @@
 'use strict';
 (async()=>{const status=document.getElementById('status');try{
  const id=location.pathname.split('/').pop(),response=await fetch('/api/course-view/'+id,{credentials:'same-origin'}),data=await response.json();if(!response.ok)throw Error(data.error||'Course unavailable.');
+ const themeSelect=document.getElementById('theme-choice'),themeControls=document.getElementById('theme-controls');
+ const allowedThemes=new Set(['midnight','daylight','forest']);
+ const requestedTheme=new URLSearchParams(location.search).get('theme');
+ const savedTheme=data.owner?sessionStorage.getItem('forma-preview-theme-'+id):null;
+ const initialTheme=allowedThemes.has(requestedTheme)?requestedTheme:allowedThemes.has(savedTheme)?savedTheme:'midnight';
+ document.body.dataset.courseTheme=initialTheme;themeSelect.value=initialTheme;
+ if(data.owner){
+  themeControls.hidden=false;
+  themeSelect.addEventListener('change',()=>{
+   const selected=themeSelect.value;if(!allowedThemes.has(selected))return;
+   document.body.dataset.courseTheme=selected;sessionStorage.setItem('forma-preview-theme-'+id,selected);
+   const url=new URL(location.href);url.searchParams.set('theme',selected);history.replaceState(null,'',url.pathname+url.search);
+  });
+ }
  document.getElementById('title').textContent=data.course.title;document.title=data.course.title+' | Forma Studio';status.textContent=data.course.published?'Published course': 'Private instructor preview';
  if(!data.owner){const section=document.createElement('section');const heading=document.createElement('h2');heading.textContent='Sandbox course subscription';section.append(heading);const message=document.createElement('p');message.textContent='Checking test subscription...';section.append(message);const subscribe=document.createElement('button');subscribe.type='button';subscribe.textContent='Subscribe using Stripe test checkout';subscribe.hidden=true;subscribe.onclick=async()=>{subscribe.disabled=true;try{const response=await fetch('/api/stripe-test/subscription-checkout',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({courseId:id})}),result=await response.json();if(!response.ok)throw Error(result.error||'Unable to open test checkout');location.assign(result.url)}catch(error){message.textContent=error.message;subscribe.disabled=false}};section.append(subscribe);document.getElementById('content').append(section);try{const r=await fetch('/api/stripe-test/subscription-status?courseId='+encodeURIComponent(id),{credentials:'same-origin'});if(r.ok){const x=await r.json();message.textContent='Test subscription: '+x.status+'. Purchase does not automatically grant course access.';subscribe.hidden=x.status==='active'}else{message.textContent='Sign in to see test subscription options.'}}catch(e){message.textContent='Subscription status unavailable.'}}
  const enroll=async()=>{const r=await fetch('/api/course-enrollments/'+id,{credentials:'same-origin'});if(!r.ok)return null;return r.json();};
@@ -80,7 +94,7 @@
   if(data.owner&&lesson.pdfId){const link=text('a','View instructor PDF');link.href='/api/course-pdf/'+lesson.pdfId;link.target='_blank';link.rel='noopener';body.append(link);}
   nodes.forEach((node,i)=>{if(node){if(i===index)node.setAttribute('aria-current','step');else node.removeAttribute('aria-current');}});
   prev.disabled=index===0;next.disabled=index===lessons.length-1;
-  try{history.replaceState(null,'',location.pathname+'?lesson='+(index+1));}catch(e){}
+  try{const url=new URL(location.href);url.searchParams.set('lesson',String(index+1));history.replaceState(null,'',url.pathname+url.search);}catch(e){}
  }
  prev.addEventListener('click',()=>select(current-1));next.addEventListener('click',()=>select(current+1));
  if(lessons.length){const requested=Number(new URLSearchParams(location.search).get('lesson'));select(Number.isInteger(requested)&&requested>=1&&requested<=lessons.length?requested-1:0);}
