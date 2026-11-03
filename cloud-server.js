@@ -278,6 +278,11 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
         // Authenticated portfolio editing interface for future AI integrations.
         // Preview never writes; save requires explicit confirmation from the caller.
         // Structured assistant editing API. All writes require owner authentication and confirmation.
+        if(p==='/api/assistant/history'&&method==='GET'){
+          const user=await auth(req);
+          const rows=await store.rest('forma_assistant_audit','user_id='+eq(user.id)+'&select=id,domain,resource_id,operation,created,metadata&order=created.desc&limit=50');
+          return json(res,200,{changes:rows});
+        }
         if(p==='/api/course-edit'&&method==='POST'){
           const user=await auth(req);await requireInstructor(user);await rate(req,'course-assistant:'+user.id,60);
           const b=await read(req),courseId=String(b.courseId||''),operation=String(b.operation||'');
@@ -314,6 +319,7 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
           if(!Number.isSafeInteger(b.expectedUpdated)||b.expectedUpdated!==Number(course.updated))throw new HttpError(409,'Course changed since preview. Refresh before saving.');
           // Write only this instructor's course; preserve publication and other metadata.
           await store.rest('forma_course_drafts','id='+eq(courseId)+'&user_id='+eq(user.id)+'&updated='+eq(course.updated),'PATCH',{title,outline,updated:Date.now()});
+          await store.rest('forma_assistant_audit','','POST',{id:id(),user_id:user.id,domain:'course',resource_id:courseId,operation,created:Date.now(),metadata:{title}});
           return json(res,200,{saved:true,courseId,operation,url:'/course/'+courseId});
         }
         if(p==='/api/portfolio-edit'&&method==='POST'){
@@ -341,6 +347,7 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
           if(JSON.stringify(result).length>250000)throw new HttpError(413,'Portfolio too large.');
           if(b.confirm!==true)return json(res,200,{preview:true,section,entries:result[section],note:'Preview only; send confirm true to save.'});
           await store.rest('forma_profiles','user_id='+eq(user.id),'PATCH',{data:result,updated:Date.now()});
+          await store.rest('forma_assistant_audit','','POST',{id:id(),user_id:user.id,domain:'portfolio',resource_id:user.id,operation:operation+':'+section,created:Date.now(),metadata:{section}});
           return json(res,200,{saved:true,section,entries:result[section],url:'/u/'+user.slug});
         }
         if(p==='/api/profile'&&method==='PUT'){
