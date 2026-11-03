@@ -261,6 +261,35 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
           const raw=(req.headers.cookie||'').split(';').map(s=>s.trim()).find(s=>s.startsWith(sessionName+'='))?.slice(sessionName.length+1);
           if(raw)await store.rest('forma_sessions',`tokenhash=${eq(tokenHash(raw))}`,'DELETE');return json(res,200,{ok:true},{'Set-Cookie':cookie('',0)});
         }
+        // Authenticated portfolio editing interface for future AI integrations.
+        // Preview never writes; save requires explicit confirmation from the caller.
+        if(p==='/api/portfolio-edit'&&method==='POST'){
+          const user=await auth(req);await rate(req,'portfolio-edit:'+user.id,60);
+          const b=await read(req),section=String(b.section||''),operation=String(b.operation||'');
+          const sections=['experience','education','research','projects','publications'];
+          if(!sections.includes(section)||!['add','replace','remove'].includes(operation))throw new HttpError(400,'Choose a supported section and action.');
+          const currentProfile=await profile(user.id),next=structuredClone(currentProfile);
+          const entries=Array.isArray(next[section])?next[section]:[];
+          const index=Number(b.index);
+          if(operation==='add'){
+            if(entries.length>=35)throw new HttpError(409,'Section limit reached.');
+            if(!b.entry||typeof b.entry!=='object'||Array.isArray(b.entry)||!clean(b.entry.title,150))throw new HttpError(400,'Provide an entry with a title.');
+            entries.push(b.entry);
+          }else{
+            if(!Number.isInteger(index)||index<0||index>=entries.length)throw new HttpError(400,'Select an existing entry.');
+            if(operation==='remove')entries.splice(index,1);
+            else{
+              if(!b.entry||typeof b.entry!=='object'||Array.isArray(b.entry)||!clean(b.entry.title,150))throw new HttpError(400,'Provide an entry with a title.');
+              entries[index]=b.entry;
+            }
+          }
+          next[section]=entries;
+          const result=sanitize(next,user);
+          if(JSON.stringify(result).length>250000)throw new HttpError(413,'Portfolio too large.');
+          if(b.confirm!==true)return json(res,200,{preview:true,section,entries:result[section],note:'Preview only; send confirm true to save.'});
+          await store.rest('forma_profiles','user_id='+eq(user.id),'PATCH',{data:result,updated:Date.now()});
+          return json(res,200,{saved:true,section,entries:result[section],url:'/u/'+user.slug});
+        }
         if(p==='/api/profile'&&method==='PUT'){
           const user=await auth(req);await rate(req,'save:'+user.id,100);const b=await read(req);const data=sanitize(b,user);
           if(JSON.stringify(data).length>250000)throw new HttpError(413,'Portfolio text is too large. Please shorten it.');
