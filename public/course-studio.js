@@ -56,7 +56,7 @@ function render(){sources();
   if(l.pdfId){const open=element('a','View PDF');open.href='/api/course-pdf/'+l.pdfId;open.target='_blank';open.rel='noopener';wrap.append(open);}
   if(l.driveFile){
     const note=element('p','Google Drive video: '+l.driveFile.name+' (private instructor attachment; no student access yet)');
-    wrap.append(note,element('button','Remove Drive video',()=>{delete l.driveFile;render();say('Drive video removed from lesson. Click Save course to persist.');}));
+    wrap.append(note,element('button','Preview Drive video',()=>{const fileId=String(l.driveFile?.id||'');if(!/^[A-Za-z0-9_-]{10,}$/.test(fileId)){say('Drive video ID is invalid. Reattach the video.');return;}window.open('https://drive.google.com/file/d/'+encodeURIComponent(fileId)+'/preview','_blank','noopener,noreferrer');say('Opened Google Drive preview. If it cannot play, verify Drive permissions, video processing, and your Google account.');}),element('button','Remove Drive video',()=>{delete l.driveFile;render();say('Drive video removed from lesson. Click Save course to persist.');}));
   }
   if(l.type==='youtube')wrap.append(element('button','Preview video',()=>{const id=CourseTools.youtubeId(l.content);if(!id){say('Enter a valid HTTPS YouTube watch, short, embed or youtu.be URL.');return;}wrap.querySelector('iframe')?.remove();const frame=element('iframe');frame.src='https://www.youtube-nocookie.com/embed/'+id;frame.title=l.title||'YouTube lesson';frame.allow='fullscreen; encrypted-media; picture-in-picture';frame.referrerPolicy='strict-origin-when-cross-origin';frame.style.cssText='width:100%;aspect-ratio:16/9;border:0';wrap.append(frame);}));
   else wrap.append(element('button','Regenerate lesson',()=>generate({scope:'lesson',chapter:i,lesson:j})));
