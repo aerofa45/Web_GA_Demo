@@ -31,7 +31,7 @@ async function enrollments(){
  }catch(error){root.textContent=error.message;}
 }
 el('enrollment-refresh').addEventListener('click',enrollments);
-async function load(id){const version=++loading,d=await api('/api/course-drafts/'+id);if(version!==loading)return;active=id;outline=d.course.outline||{chapters:[]};published=d.course.published;directPdf=null;el('material').value='';el('course-title').value=d.course.title;el('editor').hidden=false;publication();render();enrollments();window.dispatchEvent(new CustomEvent('forma:course-selected',{detail:{id}}));say('Editing '+d.course.title);}
+async function load(id){const version=++loading,d=await api('/api/course-drafts/'+id);if(version!==loading)return;active=id;outline=d.course.outline||{chapters:[]};published=d.course.published;const themeChoice=el('course-preview-theme');if(themeChoice)themeChoice.value=['midnight','daylight','forest'].includes(outline.theme)?outline.theme:'midnight';directPdf=null;el('material').value='';el('course-title').value=d.course.title;el('editor').hidden=false;publication();render();enrollments();window.dispatchEvent(new CustomEvent('forma:course-selected',{detail:{id}}));say('Editing '+d.course.title);}
 const previewLink=el('preview');
 if(previewLink){
  const picker=document.createElement('select');picker.id='course-preview-theme';picker.setAttribute('aria-label','Course preview theme');
@@ -40,7 +40,7 @@ if(previewLink){
  }
  const label=document.createElement('label');label.textContent='Preview design: ';label.htmlFor=picker.id;
  previewLink.before(label,picker);
- picker.addEventListener('change',()=>{if(active)previewLink.href='/course/'+active+'?theme='+encodeURIComponent(picker.value)});
+ picker.addEventListener('change',()=>{if(active){outline.theme=picker.value;previewLink.href='/course/'+active+'?theme='+encodeURIComponent(picker.value);say('Preview theme changed. Save course to publish this design for students.')}});
 }
 function publication(){el('publication').textContent=published?'Published publicly':'Private draft';el('publish').textContent=published?'Unpublish course':'Publish publicly';el('preview').href='/course/'+active+'?theme='+encodeURIComponent(el('course-preview-theme')?.value||'midnight');}
 function sources(){const select=el('material'),old=select.value;select.replaceChildren();const notes=element('option','Typed notes only');notes.value='';select.append(notes);const uploadOption=element('option','Upload a new PDF for Gemini');uploadOption.value='upload';select.append(uploadOption);if(directPdf){const directOption=element('option','Uploaded PDF: '+directPdf.name);directOption.value='direct';select.append(directOption);}outline.chapters.forEach((c,i)=>c.lessons.forEach((l,j)=>{const o=element('option',c.title+' / '+l.title+(l.pdfId?' (PDF)':' (text)'));o.value=i+':'+j;select.append(o);}));select.value=old;if(select.selectedIndex<0)select.value='';}
@@ -75,7 +75,7 @@ function render(){sources();
  });
  section.append(element('button','Add lesson',()=>{c.lessons.push({title:'New lesson',type:'text',content:''});render();}),element('button','Regenerate chapter',()=>generate({scope:'chapter',chapter:i})),element('button','Remove chapter',()=>{outline.chapters.splice(i,1);render();}));root.append(section);
 });}
-async function save(nextPublished=published){if(!active)throw Error('Select a course first.');const courseId=active;await api('/api/course-drafts/'+courseId,{method:'PUT',body:JSON.stringify({title:el('course-title').value,outline,published:nextPublished})});if(active===courseId){published=nextPublished;publication();}await list();say('Course saved'+(nextPublished?' and published.':'.'));}
+async function save(nextPublished=published){if(!active)throw Error('Select a course first.');outline.theme=el('course-preview-theme')?.value||'midnight';const courseId=active;await api('/api/course-drafts/'+courseId,{method:'PUT',body:JSON.stringify({title:el('course-title').value,outline,published:nextPublished})});if(active===courseId){published=nextPublished;publication();}await list();say('Course saved'+(nextPublished?' and published.':'.'));}
 async function generate(target={scope:'course'}){
  if(generating)return;try{if(!active)throw Error('Select a course first.');const courseId=active,snapshot=JSON.stringify(outline),selection=el('material').value;
  if(selection==='upload')throw Error('Choose a PDF first.');const [i,j]=selection.split(':').map(Number),selected=selection&&selection!=='direct'?outline.chapters[i]?.lessons[j]:null;
