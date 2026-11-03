@@ -81,17 +81,27 @@ async function generate(target={scope:'course'}){
 }
 el('material').addEventListener('change',()=>{if(el('material').value==='upload')el('gemini-pdf-file').click();});
 el('gemini-pdf-file').addEventListener('change',async()=>{const inputFile=el('gemini-pdf-file').files?.[0];if(!inputFile)return;const courseId=active;try{if(!courseId)throw Error('Create or select a course first.');if(inputFile.size>1800000)throw Error('PDF must be less than 1.8 MB.');el('gemini-pdf-status').textContent='Uploading PDF...';const data=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(Error('Could not read PDF.'));reader.readAsDataURL(inputFile);});const result=await api('/api/course-pdf',{method:'POST',body:JSON.stringify({courseId,name:inputFile.name,data})});if(active!==courseId)throw Error('Course changed during upload. Select the original course to use the PDF.');directPdf={pdfId:result.file.id,name:result.file.name};sources();el('material').value='direct';el('gemini-pdf-status').textContent='Ready: '+directPdf.name+'. Click Generate outline; no typed notes required.';say('PDF uploaded for Gemini.');}catch(e){el('gemini-pdf-status').textContent=e.message;say(e.message);sources();}finally{el('gemini-pdf-file').value='';}});
-window.addEventListener('forma:drive-video-selected',event=>{
+let pendingDriveFile=null;
+function attachDriveFile(){
  try{
-  if(!active)throw Error('Select a course first.');
-  const [i,j]=el('drive-lesson').value.split(':').map(Number);
-  const lesson=outline.chapters[i]?.lessons[j];
-  if(!lesson||lesson.type!=='text')throw Error('Select a text lesson under Attach selected video to lesson first.');
-  const file=event.detail;if(!file||!file.id||!file.name)throw Error('Invalid selected Drive video.');
-  lesson.driveFile={id:file.id,name:file.name,mimeType:file.mimeType};
-  render();el('drive-lesson').value=i+':'+j;
-  say('Drive video attached to '+lesson.title+'. Click Save course to persist the change.');
- }catch(error){say(error.message);}
+  if(!active)throw Error('Select or create a course first.');
+  if(!pendingDriveFile)throw Error('Choose a video using Select Drive video first.');
+  const selected=el('drive-lesson').value;
+  if(!/^\d+:\d+$/.test(selected))throw Error('Choose a text lesson from the dropdown before attaching.');
+  const [i,j]=selected.split(':').map(Number),lesson=outline.chapters[i]?.lessons[j];
+  if(!lesson||lesson.type!=='text')throw Error('Choose a text lesson.');
+  lesson.driveFile={id:pendingDriveFile.id,name:pendingDriveFile.name,mimeType:pendingDriveFile.mimeType};
+  render();el('drive-lesson').value=selected;
+  el('drive-file').textContent='Attached '+pendingDriveFile.name+' to '+lesson.title+'. Click Save course above, then reopen this course to verify it was saved.';
+  say('Attached video to '+lesson.title+'. Click Save course to persist.');
+ }catch(error){el('drive-file').textContent=error.message;say(error.message);}
+}
+el('drive-attach').addEventListener('click',attachDriveFile);
+window.addEventListener('forma:drive-video-selected',event=>{
+ pendingDriveFile=event.detail;
+ if(!pendingDriveFile?.id||!pendingDriveFile?.name){el('drive-file').textContent='Invalid selected video.';return;}
+ if(/^\d+:\d+$/.test(el('drive-lesson').value))attachDriveFile();
+ else el('drive-file').textContent='Selected '+pendingDriveFile.name+'. Now choose a text lesson above, then click Attach selected video to lesson.';
 });
 el('create').addEventListener('click',async()=>{try{const d=await api('/api/course-drafts',{method:'POST',body:JSON.stringify({title:el('new-title').value})});await list();await load(d.course.id);}catch(e){say(e.message);}});
 el('add-chapter').addEventListener('click',()=>{outline.chapters.push({title:'New chapter',lessons:[]});render();});
