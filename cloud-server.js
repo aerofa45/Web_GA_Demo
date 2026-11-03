@@ -350,9 +350,8 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
           if(b.confirm!==true)return json(res,200,{preview:true,operation,courseId,expectedUpdated:course.updated,proposed,note:'Preview only. Confirm to save.'});
           if(!Number.isSafeInteger(b.expectedUpdated)||b.expectedUpdated!==Number(course.updated))throw new HttpError(409,'Course changed since preview. Refresh before saving.');
           // Write only this instructor's course; preserve publication and other metadata.
-          const versionId=id();await store.rest('forma_assistant_versions','','POST',{id:versionId,user_id:user.id,domain:'course',resource_id:courseId,created:Date.now(),previous:{title:course.title,outline:course.outline}});
-          await store.rest('forma_course_drafts','id='+eq(courseId)+'&user_id='+eq(user.id)+'&updated='+eq(course.updated),'PATCH',{title,outline,updated:Date.now()});
-          await store.rest('forma_assistant_audit','','POST',{id:id(),user_id:user.id,domain:'course',resource_id:courseId,operation,created:Date.now(),metadata:{title}});
+          const transaction=await store.rpc('forma_assistant_commit',{p_user_id:user.id,p_domain:'course',p_resource_id:courseId,p_expected_updated:Number(course.updated),p_content:proposed,p_operation:operation,p_version_id:id(),p_audit_id:id(),p_now:Date.now()});
+          if(!transaction?.saved)throw new HttpError(409,'Course changed since preview. Refresh and retry.');
           return json(res,200,{saved:true,courseId,operation,url:'/course/'+courseId});
         }
         if(p==='/api/portfolio-edit'&&method==='POST'){
@@ -381,9 +380,8 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
           if(JSON.stringify(result).length>250000)throw new HttpError(413,'Portfolio too large.');
           if(b.confirm!==true)return json(res,200,{preview:true,section,entries:result[section],expectedUpdated:existing[0].updated,note:'Preview only; send confirm true and expectedUpdated to save.'});
           if(!Number.isSafeInteger(b.expectedUpdated)||b.expectedUpdated!==Number(existing[0].updated))throw new HttpError(409,'Portfolio changed since preview. Refresh before saving.');
-          await store.rest('forma_assistant_versions','','POST',{id:id(),user_id:user.id,domain:'portfolio',resource_id:user.id,created:Date.now(),previous:currentProfile});
-          await store.rest('forma_profiles','user_id='+eq(user.id)+'&updated='+eq(existing[0].updated),'PATCH',{data:result,updated:Date.now()});
-          await store.rest('forma_assistant_audit','','POST',{id:id(),user_id:user.id,domain:'portfolio',resource_id:user.id,operation:operation+':'+section,created:Date.now(),metadata:{section}});
+          const transaction=await store.rpc('forma_assistant_commit',{p_user_id:user.id,p_domain:'portfolio',p_resource_id:user.id,p_expected_updated:Number(existing[0].updated),p_content:result,p_operation:operation+':'+section,p_version_id:id(),p_audit_id:id(),p_now:Date.now()});
+          if(!transaction?.saved)throw new HttpError(409,'Portfolio changed since preview. Refresh and retry.');
           return json(res,200,{saved:true,section,entries:result[section],url:'/u/'+user.slug});
         }
         if(p==='/api/profile'&&method==='PUT'){
