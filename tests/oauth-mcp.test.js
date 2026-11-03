@@ -49,7 +49,13 @@ test('OAuth PKCE, refresh, scoped MCP access and revocation',async t=>{
  const unauth=await call('/oauth/authorize?'+qp);assert.equal(unauth.status,401);
  const consent=await call('/oauth/authorize?'+qp,{headers:{cookie:authCookie}});assert.equal(consent.status,200);
  const page=await consent.text(),nonce=/name="nonce" value="([^"]+)"/.exec(page)?.[1];assert.ok(nonce);
- const response=await call('/oauth/authorize',{method:'POST',headers:{cookie:authCookie+'; forma_oauth_consent='+nonce,'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({...Object.fromEntries(qp),nonce,decision:'approve'})});
+ const consent_expires=/name="consent_expires" value="([^"]+)"/.exec(page)?.[1];
+ const consent_signature=/name="consent_signature" value="([^"]+)"/.exec(page)?.[1];
+ assert.ok(consent_expires&&consent_signature,'Consent must contain signed expiry and CSRF token');
+ const fields={...Object.fromEntries(qp),nonce,consent_expires,consent_signature,decision:'approve'};
+ const forged=await call('/oauth/authorize',{method:'POST',headers:{cookie:authCookie,'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({...fields,state:'forged-state'})});
+ assert.equal(forged.status,403,'Changing OAuth state must invalidate the signed consent');
+ const response=await call('/oauth/authorize',{method:'POST',headers:{cookie:authCookie,'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(fields)});
  assert.equal(response.status,302);const returned=new URL(response.headers.get('location'));assert.equal(returned.searchParams.get('iss'),'https://web-ga-demo.onrender.com');const code=returned.searchParams.get('code');assert.ok(code);
  const token=await call('/oauth/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({grant_type:'authorization_code',code,code_verifier:verifier,client_id:client.client_id,redirect_uri:'https://chatgpt.com/oauth/callback',resource})});
  assert.equal(token.status,200);const creds=await token.json();
