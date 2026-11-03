@@ -51,7 +51,7 @@ async function oauthRoutes({req,res,p,method,url,store,current,origin,rate}){
   const consentPayload=(data,userId)=>JSON.stringify([userId,data.client_id,data.redirect_uri,data.state,data.code_challenge,data.scope,data.resource||'',data.nonce,data.consent_expires]);
   const consentSignature=(data,userId)=>crypto.createHmac('sha256',store.key).update(consentPayload(data,userId)).digest('base64url');
   if(method==='GET'){
-   const nonce=random();b.nonce=nonce;b.consent_expires=String(Date.now()+600000);b.consent_signature=consentSignature(b,user.id);res.setHeader('Set-Cookie','forma_oauth_consent='+nonce+'; Path=/oauth/authorize; HttpOnly; Secure; SameSite=Lax; Max-Age=600');
+   const nonce=random();b.scope=scopes;b.nonce=nonce;b.consent_expires=String(Date.now()+600000);b.consent_signature=consentSignature(b,user.id);res.setHeader('Set-Cookie','forma_oauth_consent='+nonce+'; Path=/oauth/authorize; HttpOnly; Secure; SameSite=Lax; Max-Age=600');
    const escape=x=>String(x).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
    const inputs=Object.entries({...b,scope:scopes}).filter(([k])=>['client_id','redirect_uri','response_type','code_challenge','code_challenge_method','state','scope','resource','nonce','consent_expires','consent_signature'].includes(k)).map(([k,v])=>'<input type="hidden" name="'+escape(k)+'" value="'+escape(v)+'">').join('');
    res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'"});
