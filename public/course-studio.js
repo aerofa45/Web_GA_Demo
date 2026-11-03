@@ -1,6 +1,7 @@
 'use strict';
 const el=id=>document.getElementById(id);
 let active=null,outline={chapters:[]},published=false,generating=false,loading=0,directPdf=null;
+const editorPanel=el('editor'),videoPanel=el('drive-video-panel');if(editorPanel&&videoPanel)editorPanel.after(videoPanel);
 const say=msg=>{el('message').textContent=msg;el('generate-status').textContent=msg;};
 async function api(url,opts={}){const r=await fetch(url,{credentials:'same-origin',headers:{'Content-Type':'application/json'},...opts});const data=await r.json().catch(()=>({}));if(!r.ok)throw Error(data.error||'Request failed ('+r.status+')');return data;}
 function element(tag,value,callback){const x=document.createElement(tag);if(value!==undefined)x.textContent=value;if(callback){x.type='button';x.addEventListener('click',callback);}return x;}
