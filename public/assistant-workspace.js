@@ -54,7 +54,8 @@ $('upload-resource').onclick=async()=>{
  try{
   const data=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(Error('Could not read PDF.'));reader.readAsDataURL(file)});
   const result=await api('/api/course-pdf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({courseId:course.value,name:file.name,data})});
-  message.textContent='Uploaded privately: '+result.file.name+'. To use the file as generation material, open Course Studio and select it under Teaching material.';
+  $('generate-pdf-id').value=result.file.id;
+  message.textContent='Uploaded privately: '+result.file.name+'. PDF selected for course generation. You may now click Generate draft preview.';
   $('resource-pdf').value='';
  }catch(e){message.textContent=e.message}finally{button.disabled=false}
 };
@@ -85,5 +86,58 @@ $('interpret').onclick=async()=>{
 $('preview').onclick=async()=>{try{const op=build(),result=await api(op.url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(op.data)});pending={...op,expectedUpdated:result.expectedUpdated};$('result').textContent=JSON.stringify(result,null,2);renderVisual(result,$('visual-preview'));$('apply').disabled=false;status.textContent='Preview ready. Review before saving.'}catch(e){pending=null;$('apply').disabled=true;status.textContent=e.message}};
 $('apply').onclick=async()=>{if(!pending)return;const planned=pending;$('apply').disabled=true;try{const result=await api(planned.url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...planned.data,expectedUpdated:planned.expectedUpdated,confirm:true})});pending=null;$('result').textContent=JSON.stringify(result,null,2);status.textContent='Saved. Preview the updated page.';say('Assistant','Your approved edit was saved.');if(result.url){$('open-resource').href=result.url;$('open-resource').hidden=false}await history()}catch(e){status.textContent=e.message}};
 async function history(){const result=await api('/api/assistant/history');$('history').replaceChildren();for(const c of result.changes){const p=document.createElement('p');p.textContent=new Date(Number(c.created)).toLocaleString()+' · '+c.domain+' · '+c.operation;$('history').append(p)}}
-$('reload-history').onclick=()=>history().catch(e=>status.textContent=e.message);domain.onchange=renderOps;action.onchange=()=>{$('apply').disabled=true;pending=null};renderOps();init();connectorStatus();
+let generated=null,restorePending=null;
+$('generate-course').onclick=async()=>{
+ const message=$('generate-status');message.textContent='Generating a proposed course…';$('save-generated').disabled=true;generated=null;
+ try{
+  if(!course.value)throw Error('Select an instructor-owned course in the Request a change section first.');
+  const current=await api('/api/course-drafts/'+course.value);
+  const source=$('generate-notes').value.trim(),pdfId=$('generate-pdf-id').value.trim(),topic=$('generate-topic').value.trim();
+  if(source.length<80&&!pdfId)throw Error('Provide at least 80 characters of notes or an uploaded PDF.');
+  const result=await api('/api/course-generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({courseId:course.value,source,topic,...(pdfId?{pdfId}:{})})});
+  const outline=result.outline;if(!outline||!Array.isArray(outline.chapters)||!outline.chapters.length)throw Error('No generated chapters returned.');
+  generated={courseId:course.value,title:current.course.title,outline,expectedUpdated:current.course.updated};
+  renderVisual({proposed:{title:generated.title,outline}},$('generated-preview'));
+  $('generated-preview').hidden=false;$('save-generated').disabled=false;
+  message.textContent='Preview ready. Review all generated lesson text and quiz answers. Saving will replace the current course outline, but will not publish it.';
+  say('Assistant','I prepared '+outline.chapters.length+' chapters from your materials. Review before saving.');
+ }catch(e){message.textContent=e.message;say('Assistant','Course generation could not complete: '+e.message);}
+};
+$('save-generated').onclick=async()=>{
+ if(!generated)return;
+ const item=generated;generated=null;$('save-generated').disabled=true;
+ const message=$('generate-status');
+ try{
+  const out=await api('/api/assistant/course-generation/commit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(item)});
+  message.textContent='Generated draft saved privately. Open Course Studio to edit lessons or create assignments.';
+  say('Assistant','Generated draft saved. Nothing was published.');
+  await history();
+ }catch(e){message.textContent=e.message;}
+};
+async function loadVersions(){
+ const data=await api('/api/assistant/versions'),box=$('restore-version');box.replaceChildren();
+ for(const v of data.versions||[]){
+  const opt=document.createElement('option');opt.value=v.id;
+  opt.textContent=v.domain+' · '+new Date(Number(v.created)).toLocaleString()+' · '+v.resource_id.slice(0,8);box.append(opt);
+ }
+}
+$('preview-restore').onclick=async()=>{
+ restorePending=null;$('confirm-restore').disabled=true;
+ try{
+  if(!$('restore-version').value)throw Error('No snapshots available yet.');
+  const data=await api('/api/assistant/version/'+$('restore-version').value),v=data.version;
+  restorePending={versionId:v.id,expectedUpdated:data.expectedUpdated,confirm:true};
+  $('restore-status').textContent='Snapshot from '+new Date(Number(v.created)).toLocaleString()+': '+JSON.stringify(v.previous).slice(0,600)+'… Review before restoring.';
+  $('confirm-restore').disabled=false;
+ }catch(e){$('restore-status').textContent=e.message;}
+};
+$('confirm-restore').onclick=async()=>{
+ if(!restorePending)return;
+ const change=restorePending;restorePending=null;$('confirm-restore').disabled=true;
+ try{await api('/api/assistant/restore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(change)});
+  $('restore-status').textContent='Saved version restored. The previous current state was captured as a new version.';
+  await history();await loadVersions();
+ }catch(e){$('restore-status').textContent=e.message;}
+};
+$('reload-history').onclick=()=>history().catch(e=>status.textContent=e.message);domain.onchange=renderOps;action.onchange=()=>{$('apply').disabled=true;pending=null};renderOps();init();connectorStatus();loadVersions().catch(e=>$('restore-status').textContent=e.message);
 })();
