@@ -278,6 +278,13 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
         // Authenticated portfolio editing interface for future AI integrations.
         // Preview never writes; save requires explicit confirmation from the caller.
         // Structured assistant editing API. All writes require owner authentication and confirmation.
+        if(p==='/api/assistant/catalog'&&method==='GET'){
+          const user=await auth(req);
+          const roles=await store.rest('forma_account_roles','user_id='+eq(user.id)+'&select=role&limit=1');
+          const instructor=roles[0]?.role==='instructor';
+          const ownedCourses=instructor?await store.rest('forma_course_drafts','user_id='+eq(user.id)+'&select=id,title,published,outline,updated&limit=100'):[];
+          return json(res,200,{role:instructor?'instructor':'student',admin:false,portfolio:{url:'/u/'+user.slug,sections:['experience','education','research','projects','publications']},courses:ownedCourses.filter(c=>!c.outline?.archived).map(c=>({id:c.id,title:c.title,published:c.published,updated:c.updated})),supportedCourseActions:['rename-course','add-chapter','rename-chapter','add-lesson','edit-lesson','remove-lesson'],note:'All edits require separate preview and explicit confirmation.'});
+        }
         if(p==='/api/assistant/versions'&&method==='GET'){
           const user=await auth(req);
           const versions=await store.rest('forma_assistant_versions','user_id='+eq(user.id)+'&select=id,domain,resource_id,created&order=created.desc&limit=40');
