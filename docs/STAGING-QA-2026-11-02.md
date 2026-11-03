@@ -64,3 +64,11 @@ Seven additional automated tests exposed four application issues, all fixed:
 Additional cases verify stale subscription events against current Stripe API state, reject live or unverifiable subscription responses, process asynchronous paid subscription checkout without automatic enrollment, and limit failed/expired checkout updates to pending orders. All provider calls in these new automated cases are test doubles; no Google login or live Stripe was used.
 
 The real Stripe refund test remains blocked by the mismatched connected sandbox. A Stripe account-management link was provided to connect the correct staging sandbox.
+
+### Post-deployment verification of the follow-up
+
+Render confirmed commit `0889f7e46e0970f1a1724dc6582b23d2d4ae54d4` live on the staging service. All four GitHub workflows for that commit passed (three regression workflows plus deployed OAuth smoke).
+
+An additional authenticated hosted run passed **19 checks** with the existing fictional QA instructor/student accounts, using only LMS sessions and no Google authentication. It verified account roles and no admin role; owner reads; rejection of student course reads/edits/archival, pricing changes, enrollment approval, gradebook reads, submissions and lesson completion; per-student order history and enrollment status; cross-origin save denial; anonymous denial; unsigned webhook denial; disabled live-payment routes; and unchanged instructor course data after denied operations.
+
+After the user reported updating Stripe, the connection was refreshed. It still exposed `acct_1UXUYxHOgobCVQyb`; retrieving staging's existing test Checkout session again returned `No such checkout.session`. The matching sandbox connection remains the real-refund blocker as of this verification.
