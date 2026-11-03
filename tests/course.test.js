@@ -447,3 +447,28 @@ test('refund preserves another paid entitlement and a Drive share needed by anot
  tables.forma_test_orders[1].status='refunded';assert.equal((await webhook(serverUrl,'charge.refunded',charge)).status,200);
  assert.equal(tables.forma_course_enrollments[0].status,'revoked');assert.equal(tables.forma_drive_video_grants.length,1);assert.equal(tables.forma_drive_video_grants[0].course_id,'9'.repeat(48));
 });
+
+test('approved student submits, receives grade, takes a quiz and persists isolated lesson progress',async t=>{
+ const {tables,req}=await setup(t);const student=studentFixture(tables);tables.forma_course_enrollments[0].status='approved';const root='/api/lms/'+cid+'/';
+ const assignment=await req(root+'assignments',{title:'Responsible AI',instructions:'Describe a privacy safeguard.',maxPoints:10,weight:1});assert.equal(assignment.status,201);
+ const assignmentId=assignment.body.assignment.id;
+ const quiz=await req(root+'quizzes',{title:'AI basics',questions:[{prompt:'Which method learns from data?',options:['Machine learning','Fixed arithmetic'],correct:0}],maxAttempts:1});assert.equal(quiz.status,201);
+ tables.forma_sessions[0].user_id=student;
+ const publicQuiz=await req(root+'quizzes',undefined,true,'GET');assert.equal(publicQuiz.status,200);assert.ok(!Object.hasOwn(publicQuiz.body.quizzes[0].questions[0],'correct'));
+ assert.equal((await req(root+'assignments',{title:'Unauthorized'})).status,403);
+ assert.equal((await req(root+'submissions',{assignmentId,content:'Minimize collected personal data.'})).status,201);
+ assert.equal((await req(root+'submissions',{assignmentId,content:'Repeated'})).status,409);
+ assert.equal((await req(root+'attempts',{quizId:quiz.body.id,answers:[0]})).body.score,1);
+ assert.equal((await req(root+'attempts',{quizId:quiz.body.id,answers:[0]})).status,409);
+ for(let n=0;n<2;n++)assert.equal((await req(root+'progress',{chapterIndex:0,lessonIndex:0})).status,200);
+ assert.equal(tables.forma_lesson_progress.length,1);
+ tables.forma_sessions[0].user_id=uid;
+ assert.equal((await req(root+'submissions',{assignmentId,studentId:student,score:8,feedback:'Good safeguard.'},true,'PUT')).status,200);
+ tables.forma_sessions[0].user_id=student;
+ const grades=await req(root+'gradebook',undefined,true,'GET');assert.equal(grades.body.weighted[0].percent,80);assert.equal(grades.body.grades[0].feedback,'Good safeguard.');
+ assert.equal((await req(root+'notifications',undefined,true,'GET')).body.notifications.length,1);
+ const other='9'.repeat(48);tables.forma_users.push({id:other,email:'other@example.com'});tables.forma_course_enrollments.push({course_id:cid,email:'other@example.com',status:'approved'});tables.forma_sessions[0].user_id=other;
+ assert.equal((await req(root+'gradebook',undefined,true,'GET')).body.grades.length,0);
+ assert.equal((await req(root+'submissions',undefined,true,'GET')).body.submissions.length,0);
+ assert.equal((await req(root+'progress',undefined,true,'GET')).body.progress.length,0);
+});
