@@ -6,7 +6,7 @@ const sharp=require('sharp');
 const {createApp,createStore}=require('../cloud-server');
 
 function memoryStore(){
-  const tables=Object.fromEntries(['users','profiles','sessions','messages','uploads','limits'].map(n=>['forma_'+n,[]]));
+  const tables=Object.fromEntries(['users','profiles','sessions','messages','uploads','limits','account_roles'].map(n=>['forma_'+n,[]]));
   return {url:'https://example.supabase.co',key:'unit-test-key',tables,objects:[],
     async rest(table,query='',method='GET',body){
       const q=new URLSearchParams(query);
