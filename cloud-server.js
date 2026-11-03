@@ -696,6 +696,15 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
             const enrolled=await store.rest('forma_course_enrollments','course_id='+eq(courseId)+'&email='+eq(email)+'&select=status&limit=1');
             if(!enrolled.length)throw new HttpError(404,'No enrollment request for this email.');
             if(decision==='approve'){
+              const priceRows=await store.rest('forma_course_prices','course_id='+eq(courseId)+'&enabled=eq.true&select=amount_cents&limit=1');
+              if(priceRows.length){
+                const paidStudents=await store.rest('forma_users','email='+eq(email)+'&select=id&limit=1');
+                if(!paidStudents.length)throw new HttpError(403,'Student account required for paid enrollment.');
+                const payments=await store.rest('forma_test_orders','course_id='+eq(courseId)+'&student_id='+eq(paidStudents[0].id)+'&status=eq.paid&select=id&limit=1');
+                if(!payments.length)throw new HttpError(402,'A verified test payment is required before approving paid course access.');
+              }
+            }
+            if(decision==='approve'){
               const students=await store.rest('forma_users','email='+eq(email)+'&select=id&limit=1');
               if(!students.length)throw new HttpError(403,'Student must register with this email first.');
               const verified=await store.rest('forma_google_connections','user_id='+eq(students[0].id)+'&role=eq.student&email='+eq(email)+'&select=google_sub&limit=1');
