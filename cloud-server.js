@@ -157,10 +157,39 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
           const sessions=(await lookup.json()).data||[];
           for(const session of sessions){
             if(session.livemode!==false||!/^cs_test_/.test(session.id||''))continue;
-            const rows=await store.rest('forma_test_orders','checkout_session_id='+eq(session.id)+'&status=eq.paid&select=id&limit=1');
-            if(rows.length)await store.rest('forma_test_orders','id='+eq(rows[0].id)+'&status=eq.paid','PATCH',{status:'refunded'});
+            const rows=await store.rest('forma_test_orders','checkout_session_id='+eq(session.id)+'&status=in.(paid,refunded)&select=id&limit=1');
+            if(rows.length){
+              const orderDetails=await store.rest('forma_test_orders','id='+eq(rows[0].id)+'&select=id,course_id,student_id,status&limit=1');
+              const order=orderDetails[0];if(!order)continue;
+              await store.rest('forma_test_orders','id='+eq(order.id)+'&status=eq.paid','PATCH',{status:'refunded'});
+              const otherPaid=await store.rest('forma_test_orders','course_id='+eq(order.course_id)+'&student_id='+eq(order.student_id)+'&status=eq.paid&select=id&limit=1');
+              if(otherPaid.length)continue;
+              const students=await store.rest('forma_users','id='+eq(order.student_id)+'&select=email&limit=1');
+              const email=students[0]?.email?.toLowerCase();if(!email)continue;
+              const enrolled=await store.rest('forma_course_enrollments','course_id='+eq(order.course_id)+'&email='+eq(email)+'&select=status&limit=1');
+              if(enrolled[0]?.status==='approved')await store.rest('forma_course_enrollments','course_id='+eq(order.course_id)+'&email='+eq(email)+'&status=eq.approved','PATCH',{status:'revoked',updated:Date.now()});
+              const grants=await store.rest('forma_drive_video_grants','course_id='+eq(order.course_id)+'&email='+eq(email)+'&select=file_id,permission_id');
+              if(!grants.length)continue;
+              const courses=await store.rest('forma_course_drafts','id='+eq(order.course_id)+'&select=user_id&limit=1');
+              const instructorId=courses[0]?.user_id;
+              const connections=instructorId?await store.rest('forma_google_connections','user_id='+eq(instructorId)+'&role=eq.instructor&select=refresh_cipher&limit=1'):[];
+              if(!connections.length)throw new HttpError(502,'Refund entitlement revoked; instructor Google Drive connection needed to remove shared files.');
+              const tokens=await googleToken({client_id:process.env.GOOGLE_CLIENT_ID,client_secret:process.env.GOOGLE_CLIENT_SECRET,refresh_token:decryptGoogle(connections[0].refresh_cipher),grant_type:'refresh_token'});
+              if(!tokens.access_token)throw new HttpError(502,'Refund entitlement revoked; Google token refresh failed.');
+              for(const grant of grants){
+                const otherGrants=await store.rest('forma_drive_video_grants','file_id='+eq(grant.file_id)+'&email='+eq(email)+'&select=course_id');
+                if(otherGrants.some(g=>g.course_id!==order.course_id)){
+                  await store.rest('forma_drive_video_grants','course_id='+eq(order.course_id)+'&email='+eq(email)+'&file_id='+eq(grant.file_id),'DELETE');
+                  continue;
+                }
+                const endpoint='https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(grant.file_id)+'/permissions/'+encodeURIComponent(grant.permission_id);
+                const removed=await fetcher(endpoint,{method:'DELETE',headers:{Authorization:'Bearer '+tokens.access_token},signal:AbortSignal.timeout(15000)});
+                if(!removed.ok&&removed.status!==404)throw new HttpError(502,'Refund entitlement revoked; Google Drive permission removal failed and requires retry.');
+                await store.rest('forma_drive_video_grants','course_id='+eq(order.course_id)+'&email='+eq(email)+'&file_id='+eq(grant.file_id),'DELETE');
+              }
+            }
           }
-          return json(res,200,{received:true,notice:'Refund recorded. Instructor-managed Drive permissions require separate revocation.'});
+          return json(res,200,{received:true,notice:'Refund processed; paid entitlement revoked and private Drive grants reconciled.'});
         }
         if(!['checkout.session.completed','checkout.session.async_payment_succeeded'].includes(event.type))return json(res,200,{received:true});
         const session=event.data?.object;
