@@ -2,6 +2,7 @@
 const crypto=require('node:crypto');
 const {validateOutline}=require('./course');
 const {sanitize}=require('./profile');
+const {validateAssessments}=require('./assessment');
 const {URL,URLSearchParams}=require('node:url');
 const random=()=>crypto.randomBytes(32).toString('base64url');
 const hash=s=>crypto.createHash('sha256').update(s).digest('hex');
@@ -127,10 +128,12 @@ async function oauthRoutes({req,res,p,method,url,store,current,origin,rate}){
    {name:'create_course_draft',description:'Create a course as an unpublished draft, after explicit instructor confirmation in ChatGPT. Requires a previewHash from preview_new_course. Never publishes.',inputSchema:{type:'object',properties:{title:{type:'string'},outline:{type:'object'},previewHash:{type:'string'}},required:['title','outline','previewHash']}},
    {name:'preview_course_revision',description:'Preview replacing your course title and complete outline. Returns expectedUpdated and previewHash; does not save.',inputSchema:{type:'object',properties:{courseId:{type:'string'},title:{type:'string'},outline:{type:'object'}},required:['courseId','title','outline']}},
    {name:'save_course_revision',description:'Save a previously previewed course revision, after explicit instructor confirmation in ChatGPT. Never changes publication status.',inputSchema:{type:'object',properties:{courseId:{type:'string'},title:{type:'string'},outline:{type:'object'},expectedUpdated:{type:'integer'},previewHash:{type:'string'}},required:['courseId','title','outline','expectedUpdated','previewHash']}},
+   {name:'preview_assessment_batch',description:'Preview AI-authored LMS assignments and quiz answer keys for your own course. Nothing is saved.',inputSchema:{type:'object',properties:{courseId:{type:'string'},assessments:{type:'object'}},required:['courseId','assessments']}},
+   {name:'create_assessment_batch',description:'After the instructor explicitly confirms the assessment preview in ChatGPT, create the LMS assignments and quizzes atomically. Repeated requests do not duplicate records.',inputSchema:{type:'object',properties:{courseId:{type:'string'},assessments:{type:'object'},previewHash:{type:'string'}},required:['courseId','assessments','previewHash']}},
    {name:'preview_portfolio_revision',description:'Validate a complete revised portfolio against your account and return a preview hash; no save.',inputSchema:{type:'object',properties:{profile:{type:'object'}},required:['profile']}},
    {name:'save_portfolio_revision',description:'Save complete portfolio only after reviewing the preview and explicit confirmation. Send expectedUpdated and previewHash from preview.',inputSchema:{type:'object',properties:{profile:{type:'object'},expectedUpdated:{type:'integer'},previewHash:{type:'string'}},required:['profile','expectedUpdated','previewHash']}}
   ];
-  if(data.method==='tools/list'){success({tools:definitions.filter(x=>x.name==='list_my_resources'||x.name==='get_my_portfolio'&&scopes.includes('portfolio:read')||x.name==='get_my_course'&&scopes.includes('course:read')||x.name.includes('portfolio_revision')&&scopes.includes('portfolio:write')||(['preview_new_course','create_course_draft','preview_course_revision','save_course_revision'].includes(x.name)&&scopes.includes('course:write')))});return true}
+  if(data.method==='tools/list'){success({tools:definitions.filter(x=>x.name==='list_my_resources'||x.name==='get_my_portfolio'&&scopes.includes('portfolio:read')||x.name==='get_my_course'&&scopes.includes('course:read')||x.name.includes('portfolio_revision')&&scopes.includes('portfolio:write')||(['preview_new_course','create_course_draft','preview_course_revision','save_course_revision','preview_assessment_batch','create_assessment_batch'].includes(x.name)&&scopes.includes('course:write')))});return true}
   if(data.method!=='tools/call'){error(-32601,'Unknown MCP method.');return true}
   const name=data.params?.name,args=data.params?.arguments||{};
   if(name==='list_my_resources'){
@@ -165,6 +168,25 @@ async function oauthRoutes({req,res,p,method,url,store,current,origin,rate}){
    const result=await store.rpc('forma_assistant_commit',{p_user_id:userId,p_domain:'course',p_resource_id:owned.id,p_expected_updated:args.expectedUpdated,p_content:proposed,p_operation:'mcp-revise-course',p_version_id:crypto.randomBytes(24).toString('hex'),p_audit_id:crypto.randomBytes(24).toString('hex'),p_now:Date.now()});
    if(!result?.saved){error(-32009,'Course changed since preview. Refresh and retry.');return true}
    success(toolText({saved:true,versionId:result.versionId,url:site+'/course/'+owned.id}));return true;
+  }
+  if(['preview_assessment_batch','create_assessment_batch'].includes(name)&&scopes.includes('course:write')){
+   if(!await instructor()){error(-32003,'Instructor role required.');return true}
+   const owned=await courseOwned(args.courseId);
+   let proposed;
+   try{proposed=validateAssessments(args.assessments)}catch{error(-32602,'Invalid assignments or quiz content.');return true}
+   const previewHash=checksum({courseId:owned.id,assessments:proposed});
+   if(name==='preview_assessment_batch'){
+    success(toolText({preview:true,previewHash,courseId:owned.id,assignments:proposed.assignments,quizzes:proposed.quizzes,note:'Review the exact question answer keys before confirming.'}));return true;
+   }
+   if(args.previewHash!==previewHash){error(-32009,'Assessment content changed after preview. Preview again.');return true}
+   await rate(req,'mcp-assessment-save:'+userId,25,3600000);
+   const idFor=(kind,index)=>crypto.createHmac('sha256',store.key).update(userId+':'+previewHash+':'+kind+':'+index).digest('hex').slice(0,48);
+   const auditId=idFor('audit',0);
+   const assignments=proposed.assignments.map((row,i)=>({...row,id:idFor('a',i)}));
+   const quizzes=proposed.quizzes.map((row,i)=>({...row,id:idFor('q',i)}));
+   const saved=await store.rpc('forma_assistant_add_assessments',{p_user_id:userId,p_course_id:owned.id,p_assignments:assignments,p_quizzes:quizzes,p_audit_id:auditId,p_now:Date.now()});
+   if(!saved?.saved){error(-32009,'Assessment transaction did not commit.');return true}
+   success(toolText({saved:true,replayed:Boolean(saved.replayed),courseId:owned.id,assignments:assignments.length,quizzes:quizzes.length,published:false}));return true;
   }
   if(['preview_portfolio_revision','save_portfolio_revision'].includes(name)&&scopes.includes('portfolio:write')){
    const users=await store.rest('forma_users','id='+eq(userId)+'&select=id,name,slug&limit=1');
