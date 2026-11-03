@@ -104,6 +104,7 @@ window.addEventListener('forma:drive-video-selected',event=>{
  if(/^\d+:\d+$/.test(el('drive-lesson').value))attachDriveFile();
  else el('drive-file').textContent='Selected '+pendingDriveFile.name+'. Now choose a text lesson above, then click Attach selected video to lesson.';
 });
+el('enable-instructor').addEventListener('click',async()=>{if(!window.confirm('Enable course instructor tools for your account? This does not provide platform administrator access.'))return;try{await api('/api/account/enable-instructor',{method:'POST',body:JSON.stringify({confirm:true})});el('instructor-onboarding').hidden=true;await list();say('Instructor mode enabled. You can now create courses.');}catch(e){say(e.message)}});
 el('create').addEventListener('click',async()=>{try{const d=await api('/api/course-drafts',{method:'POST',body:JSON.stringify({title:el('new-title').value})});await list();await load(d.course.id);}catch(e){say(e.message);}});
 el('add-chapter').addEventListener('click',()=>{outline.chapters.push({title:'New chapter',lessons:[]});render();});
 el('save').addEventListener('click',()=>save().catch(e=>say(e.message)));
@@ -111,4 +112,4 @@ el('publish').addEventListener('click',()=>{if(!published&&!window.confirm('Publ
 el('delete-course').addEventListener('click',async()=>{if(!active||!window.confirm('Move this course to Trash? It will be unpublished. You can restore it from Trash.'))return;const courseId=active;try{await api('/api/course-drafts/'+courseId,{method:'DELETE',body:'{}'});if(active===courseId){active=null;outline={chapters:[]};el('editor').hidden=true;sources();}await list();say('Course moved to Trash. You can restore it below Your courses.');}catch(e){say(e.message);}});
 el('generate').addEventListener('click',()=>generate());
 window.addEventListener('error',e=>say('Page error: '+e.message));window.addEventListener('unhandledrejection',e=>say(e.reason?.message||'Request failed.'));
-api('/api/me').then(d=>{if(!d.user)location.href='/login';else list().then(async()=>{if(!active){const first=el('courses').querySelector('button');if(first)first.click();}}).catch(e=>say(e.message));}).catch(e=>say(e.message));
+api('/api/me').then(d=>{if(!d.user)location.href='/login';else api('/api/account/role').then(role=>{if(role.role!=='instructor'){el('instructor-onboarding').hidden=false;el('editor').hidden=true;return;}return list().then(()=>{if(!active){const first=el('courses').querySelector('button');if(first)first.click();}});}).catch(e=>say(e.message));}).catch(e=>say(e.message));
