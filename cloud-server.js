@@ -49,6 +49,7 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
     return users[0]||null;
   }
   async function auth(req){const user=await current(req);if(!user)throw new HttpError(401,'Please log in.');return user;}
+  async function requireInstructor(user){const rows=await store.rest('forma_account_roles','user_id='+eq(user.id)+'&role=eq.instructor&select=role&limit=1');if(!rows.length)throw new HttpError(403,'Instructor access required. Enable instructor mode from your account first.');}
   async function profile(user){const rows=await store.rest('forma_profiles',`user_id=${eq(user)}&select=data&limit=1`);if(!rows.length)throw new HttpError(404,'Portfolio not found.');return rows[0].data;}
   async function rate(req,action,max,window=3600000){
     const ip=trustProxy?String(req.headers['x-forwarded-for']||req.socket.remoteAddress).split(',')[0].trim():req.socket.remoteAddress;
@@ -246,7 +247,7 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
           if(!/^\S+@\S+\.\S+$/.test(email)||!name||!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)||password.length<10||password.length>256)throw new HttpError(400,'Use a valid email, name, URL name, and password of 10–256 characters.');
           if(['demo','app','login','register','admin','api','public','assets','privacy'].includes(slug))throw new HttpError(400,'That URL name is reserved.');
           const uid=id(),salt=id(),token=id(),passhash=(await scrypt(password,salt,64)).toString('hex');const data=sanitize(initial(name,slug),{name});
-          await store.rpc('forma_register',{p_user:{id:uid,email,name,slug,salt,passhash,created:Date.now()},p_profile:data,p_token:tokenHash(token),p_expires:Date.now()+TTL});
+          await store.rpc('forma_register',{p_user:{id:uid,email,name,slug,salt,passhash,created:Date.now()},p_profile:data,p_token:tokenHash(token),p_expires:Date.now()+TTL});await store.rest('forma_account_roles','','POST',{user_id:uid,role:'student',created:Date.now()});
           return json(res,201,{user:{id:uid,email,name,slug},profile:data},{'Set-Cookie':cookie(token)});
         }
         if(p==='/api/login'&&method==='POST'){
@@ -261,11 +262,24 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
           const raw=(req.headers.cookie||'').split(';').map(s=>s.trim()).find(s=>s.startsWith(sessionName+'='))?.slice(sessionName.length+1);
           if(raw)await store.rest('forma_sessions',`tokenhash=${eq(tokenHash(raw))}`,'DELETE');return json(res,200,{ok:true},{'Set-Cookie':cookie('',0)});
         }
+        if(p==='/api/account/role'&&method==='GET'){
+          const user=await auth(req);const roles=await store.rest('forma_account_roles','user_id='+eq(user.id)+'&select=role&limit=1');
+          return json(res,200,{role:roles[0]?.role||'student',admin:false});
+        }
+        if(p==='/api/account/enable-instructor'&&method==='POST'){
+          const user=await auth(req),b=await read(req);
+          if(b.confirm!==true)throw new HttpError(400,'Explicit confirmation required.');
+          const roles=await store.rest('forma_account_roles','user_id='+eq(user.id)+'&select=role&limit=1');
+          if(roles[0]?.role==='instructor')return json(res,200,{role:'instructor',admin:false});
+          if(roles.length)await store.rest('forma_account_roles','user_id='+eq(user.id),'PATCH',{role:'instructor'});
+          else await store.rest('forma_account_roles','','POST',{user_id:user.id,role:'instructor',created:Date.now()});
+          return json(res,200,{role:'instructor',admin:false});
+        }
         // Authenticated portfolio editing interface for future AI integrations.
         // Preview never writes; save requires explicit confirmation from the caller.
         // Structured assistant editing API. All writes require owner authentication and confirmation.
         if(p==='/api/course-edit'&&method==='POST'){
-          const user=await auth(req);await rate(req,'course-assistant:'+user.id,60);
+          const user=await auth(req);await requireInstructor(user);await rate(req,'course-assistant:'+user.id,60);
           const b=await read(req),courseId=String(b.courseId||''),operation=String(b.operation||'');
           if(!/^[a-f0-9]{48}$/.test(courseId))throw new HttpError(400,'Valid course ID required.');
           const rows=await store.rest('forma_course_drafts','id='+eq(courseId)+'&user_id='+eq(user.id)+'&select=id,title,outline,published,updated&limit=1');
@@ -427,24 +441,24 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
         }
         // Staging course studio: owner-only drafts; no payment or private Drive playback.
         if(p==='/api/course-drafts'&&method==='GET'){
-          const user=await auth(req);
+          const user=await auth(req);await requireInstructor(user);
           const rows=await store.rest('forma_course_drafts',`user_id=${eq(user.id)}&select=id,title,outline,published,created,updated&order=updated.desc&limit=100`);
           return json(res,200,{courses:rows.filter(c=>Boolean(c.outline?.archived)===(url.searchParams.get('archived')==='true'))});
         }
         if(p==='/api/course-drafts'&&method==='POST'){
-          const user=await auth(req);await rate(req,'courses:'+user.id,30);const b=await read(req);
+          const user=await auth(req);await requireInstructor(user);await rate(req,'courses:'+user.id,30);const b=await read(req);
           const title=clean(b.title,140);if(!title)throw new HttpError(400,'Course title is required.');
           const course={id:id(),user_id:user.id,title,document_text:'',outline:{chapters:[]},created:Date.now(),updated:Date.now(),published:false};
           await store.rest('forma_course_drafts','','POST',course);return json(res,201,{course});
         }
         let courseMatch=p.match(/^\/api\/course-drafts\/([a-f0-9]{48})$/);
         if(courseMatch&&method==='GET'){
-          const user=await auth(req);
+          const user=await auth(req);await requireInstructor(user);
           const rows=await store.rest('forma_course_drafts',`id=${eq(courseMatch[1])}&user_id=${eq(user.id)}&select=*&limit=1`);
           if(!rows.length||rows[0].outline?.archived)throw new HttpError(404,'Course not found.');return json(res,200,{course:rows[0]});
         }
         if(courseMatch&&method==='PUT'){
-          const user=await auth(req);await rate(req,'course-edit:'+user.id,120);
+          const user=await auth(req);await requireInstructor(user);await rate(req,'course-edit:'+user.id,120);
           const rows=await store.rest('forma_course_drafts',`id=${eq(courseMatch[1])}&user_id=${eq(user.id)}&select=id,published,outline&limit=1`);
           if(!rows.length)throw new HttpError(404,'Course not found.');
           if(rows[0].outline?.archived)throw new HttpError(409,'Restore this course from Trash before editing.');
