@@ -5,9 +5,15 @@ const {validateOutline}=require('../course');
 const uid='a'.repeat(48),cid='c'.repeat(48),pid='d'.repeat(48),token='e'.repeat(48);
 const valid=()=>({chapters:[{title:'Chapter',lessons:[{title:'Lesson',type:'text',content:'Explanation'}]}]});
 async function setup(t,options={}){
- const tables={forma_sessions:[{tokenhash:crypto.createHash('sha256').update(token).digest('hex'),expires:Date.now()+60000,user_id:uid}],forma_users:[{id:uid,email:'teacher@example.com'}],forma_course_drafts:[{id:cid,user_id:uid,title:'Original',outline:valid()}],forma_course_files:[{id:pid,user_id:uid,course_id:cid,object_key:'private.pdf'}],forma_course_enrollments:[],forma_drive_video_grants:[],forma_google_connections:[],forma_assignments:[],forma_submissions:[],forma_quizzes:[],forma_quiz_attempts:[],forma_lesson_progress:[],forma_submission_files:[],forma_attendance:[],forma_notifications:[],forma_course_subscription_prices:[],forma_test_subscriptions:[],forma_account_roles:[{user_id:uid,role:'instructor'}],forma_assistant_audit:[],forma_assistant_versions:[],forma_profiles:[{user_id:uid,data:{name:'Teacher',experience:[],education:[],research:[],projects:[],publications:[]},updated:1}]};
+ const tables={forma_sessions:[{tokenhash:crypto.createHash('sha256').update(token).digest('hex'),expires:Date.now()+60000,user_id:uid}],forma_users:[{id:uid,email:'teacher@example.com'}],forma_course_drafts:[{id:cid,user_id:uid,title:'Original',outline:valid(),updated:1}],forma_course_files:[{id:pid,user_id:uid,course_id:cid,object_key:'private.pdf'}],forma_course_enrollments:[],forma_drive_video_grants:[],forma_google_connections:[],forma_assignments:[],forma_submissions:[],forma_quizzes:[],forma_quiz_attempts:[],forma_lesson_progress:[],forma_submission_files:[],forma_attendance:[],forma_notifications:[],forma_course_subscription_prices:[],forma_test_subscriptions:[],forma_account_roles:[{user_id:uid,role:'instructor'}],forma_assistant_audit:[],forma_assistant_versions:[],forma_profiles:[{user_id:uid,data:{name:'Teacher',experience:[],education:[],research:[],projects:[],publications:[]},updated:1}]};
  const state={calls:[],rates:0,reply:()=>new Response(JSON.stringify({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(valid())}]}}]})),pdf:Buffer.from('%PDF-1.4 fixture')};
- const store={url:'https://example.supabase.co',key:'fixture',async rpc(){state.rates++;return true;},async rest(table,query='',method='GET',body){const q=new URLSearchParams(query);const matches=r=>[...q].every(([k,v])=>['select','limit','order'].includes(k)||v.startsWith('eq.')&&String(r[k])===decodeURIComponent(v.slice(3))||v.startsWith('gt.')&&r[k]>Number(v.slice(3)));const rows=tables[table].filter(matches);if(method==='POST'){tables[table].push(structuredClone(body));return null;}if(method==='PATCH'){rows.forEach(r=>Object.assign(r,structuredClone(body)));return null;}if(method==='DELETE'){tables[table]=tables[table].filter(r=>!matches(r));return null;}return structuredClone(rows).map(row=>q.has('select')&&q.get('select')!=='*'?Object.fromEntries(q.get('select').split(',').map(k=>[k,row[k]])):row);}};
+ const store={url:'https://example.supabase.co',key:'fixture',async rpc(name,args){state.rates++;if(name==='forma_assistant_commit'){
+   const target=name&&args.p_domain==='course'?tables.forma_course_drafts.find(x=>x.id===args.p_resource_id&&x.user_id===args.p_user_id):null;
+   if(!target||target.updated!==args.p_expected_updated)return {saved:false,conflict:true};
+   tables.forma_assistant_versions.push({id:args.p_version_id,user_id:args.p_user_id,domain:'course',resource_id:target.id,created:args.p_now,previous:{title:target.title,outline:structuredClone(target.outline)}});
+   target.title=args.p_content.title;target.outline=structuredClone(args.p_content.outline);target.updated=Math.max(args.p_now,target.updated+1);
+   return {saved:true,versionId:args.p_version_id};
+  }return true;},async rest(table,query='',method='GET',body){const q=new URLSearchParams(query);const matches=r=>[...q].every(([k,v])=>['select','limit','order'].includes(k)||v.startsWith('eq.')&&String(r[k])===decodeURIComponent(v.slice(3))||v.startsWith('gt.')&&r[k]>Number(v.slice(3)));const rows=tables[table].filter(matches);if(method==='POST'){tables[table].push(structuredClone(body));return null;}if(method==='PATCH'){rows.forEach(r=>Object.assign(r,structuredClone(body)));return null;}if(method==='DELETE'){tables[table]=tables[table].filter(r=>!matches(r));return null;}return structuredClone(rows).map(row=>q.has('select')&&q.get('select')!=='*'?Object.fromEntries(q.get('select').split(',').map(k=>[k,row[k]])):row);}};
  const server=http.createServer(createApp(store,{geminiKey:'fake-test-key',...options,fetcher:async(url,options)=>{state.calls.push({url,options});return url.includes('googleapis')?state.reply():new Response(state.pdf);}}));
  await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>{server.closeAllConnections();server.close();});
  async function req(route,body,authenticated=true,method='POST'){const r=await fetch('http://127.0.0.1:'+server.address().port+route,{method,headers:{'Content-Type':'application/json',...(authenticated?{cookie:'forma_session='+token}:{})},body:method==='GET'?undefined:JSON.stringify(body)});return {status:r.status,body:await r.json()};}
@@ -242,4 +248,41 @@ test('assistant editing prevents students from changing instructor courses and b
  assert.equal((await req('/api/course-edit',{courseId:cid,operation:'add-chapter',title:'Unauthorized'},false)).status,401);
  tables.forma_account_roles[0].role='student';
  assert.equal((await req('/api/course-edit',{courseId:cid,operation:'add-chapter',title:'Unauthorized'})).status,403);
+});
+
+test('AI-generated course is previewed, saved atomically, versioned and restored by its owner',async t=>{
+ const {req,tables}=await setup(t);
+ const old=structuredClone(tables.forma_course_drafts[0].outline);
+ const newOutline={chapters:[{title:'Generated unit',lessons:[{title:'Probability fundamentals',type:'text',content:'A grounded explanation'}]}]};
+ const route='/api/assistant/course-generation/commit';
+ const args={courseId:cid,title:'AI course',outline:newOutline,expectedUpdated:1};
+ assert.equal((await req(route,args,false)).status,401);
+ const preview=await req('/api/course-generate',{source:'Probability and statistics teaching notes. '.repeat(4)});
+ assert.equal(preview.status,200);
+ assert.equal(tables.forma_course_drafts[0].title,'Original','generation must not save');
+ assert.equal((await req(route,{...args,expectedUpdated:2})).status,409);
+ const saved=await req(route,args);assert.equal(saved.status,200);assert.equal(saved.body.saved,true);
+ assert.equal(tables.forma_course_drafts[0].title,'AI course');
+ assert.deepEqual(tables.forma_course_drafts[0].outline,newOutline);
+ assert.equal(tables.forma_assistant_versions.length,1);
+ const versionId=tables.forma_assistant_versions[0].id;
+ assert.equal((await req('/api/assistant/version/'+versionId,undefined,false,'GET')).status,401);
+ const snapshot=await req('/api/assistant/version/'+versionId,undefined,true,'GET');
+ assert.equal(snapshot.status,200);assert.deepEqual(snapshot.body.version.previous.outline,old);
+ const stale=await req('/api/assistant/restore',{versionId,expectedUpdated:1,confirm:true});
+ assert.equal(stale.status,409);
+ const restore=await req('/api/assistant/restore',{versionId,expectedUpdated:snapshot.body.expectedUpdated,confirm:true});
+ assert.equal(restore.status,200);
+ assert.equal(tables.forma_course_drafts[0].title,'Original');
+ assert.deepEqual(tables.forma_course_drafts[0].outline,old);
+ assert.equal(tables.forma_assistant_versions.length,2,'restore must be reversible');
+});
+test('student cannot save generated courses or read and restore instructor snapshots',async t=>{
+ const {req,tables}=await setup(t);
+ tables.forma_assistant_versions.push({id:'f'.repeat(48),user_id:uid,domain:'course',resource_id:cid,previous:{title:'Earlier',outline:valid()},created:Date.now()});
+ tables.forma_users.push({id:'b'.repeat(48),email:'student@example.com'});
+ tables.forma_sessions[0].user_id='b'.repeat(48);
+ assert.equal((await req('/api/assistant/course-generation/commit',{courseId:cid,title:'Not mine',outline:valid(),expectedUpdated:1})).status,403);
+ assert.equal((await req('/api/assistant/version/'+'f'.repeat(48),undefined,true,'GET')).status,404);
+ assert.equal((await req('/api/assistant/restore',{versionId:'f'.repeat(48),expectedUpdated:1,confirm:true})).status,404);
 });
