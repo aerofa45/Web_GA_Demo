@@ -655,7 +655,7 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
           }
           if(method==='POST'&&kind==='attendance'){
             admin();const b=await body(),date=String(b.date||''),studentId=String(b.studentId||''),status=b.status;
-            if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(date)||!/^[a-f0-9]{48}$/.test(studentId)||!['present','absent','excused','late'].includes(status))throw new HttpError(400,'Invalid attendance.');
+            if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||!/^[a-f0-9]{48}$/.test(studentId)||!['present','absent','excused','late'].includes(status))throw new HttpError(400,'Invalid attendance.');
             const student=await store.rest('forma_users','id='+eq(studentId)+'&select=email&limit=1');
             if(!student.length)throw new HttpError(404,'Student not found.');
             const access=await store.rest('forma_course_enrollments','course_id='+eq(courseId)+'&email='+eq(student[0].email.toLowerCase())+'&status=eq.approved&select=email&limit=1');
