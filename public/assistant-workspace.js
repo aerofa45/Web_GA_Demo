@@ -111,7 +111,7 @@ $('save-generated').onclick=async()=>{
  const item=generated;generated=null;$('save-generated').disabled=true;
  const message=$('generate-status');
  try{
-  const out=await api('/api/assistant/course-generation/commit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(item)});
+  const out=await api('/api/assistant/course-generation/commit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...item,confirm:true})});
   message.textContent='Generated draft saved privately. Open Course Studio to edit lessons or create assignments.';
   say('Assistant','Generated draft saved. Nothing was published.');
   await history();
