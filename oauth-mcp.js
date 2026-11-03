@@ -9,13 +9,13 @@ const eq=s=>'eq.'+encodeURIComponent(s);
 const knownScopes=['portfolio:read','course:read','portfolio:write','course:write'];
 function response(res,status,data,headers={}){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...headers});res.end(JSON.stringify(data));}
 function problem(status,message){const e=new Error(message);e.status=status;throw e;}
-async function body(req,asForm=false){
- let raw='',size=0;for await(const c of req){size+=c.length;if(size>20000)problem(413,'OAuth request too large.');raw+=c.toString();}
+async function body(req,asForm=false,maxBytes=20000){
+ let raw='',size=0;for await(const c of req){size+=c.length;if(size>maxBytes)problem(413,'Request too large.');raw+=c.toString();}
  if(asForm)return Object.fromEntries(new URLSearchParams(raw));
  try{return JSON.parse(raw||'{}')}catch{problem(400,'Invalid JSON.')}
 }
 const isRedirect=s=>{try{const u=new URL(s);return u.protocol==='https:'&&!u.username&&!u.password&&!u.hash&&u.hostname.includes('.')&&s.length<1000}catch{return false}};
-function requiredScopes(raw){const list=String(raw||'portfolio:read course:read').split(/\s+/).filter(Boolean);if(!list.length||list.some(x=>!knownScopes.includes(x)))problem(400,'Unsupported scope.');return [...new Set(list)].join(' ')}
+function requiredScopes(raw){const list=String(raw||'portfolio:read course:read portfolio:write course:write').split(/\s+/).filter(Boolean);if(!list.length||list.some(x=>!knownScopes.includes(x)))problem(400,'Unsupported scope.');return [...new Set(list)].join(' ')}
 function siteOrigin(origin){if(typeof origin!=='string'||!/^https:\/\//.test(origin))problem(503,'Connector origin not configured.');return origin.replace(/\/$/,'')}
 function clientRedirect(c,r){return Array.isArray(c.redirect_uris)&&c.redirect_uris.includes(r)}
 async function oauthRoutes({req,res,p,method,url,store,current,origin,rate}){
@@ -98,7 +98,7 @@ async function oauthRoutes({req,res,p,method,url,store,current,origin,rate}){
   const tokens=await store.rest('forma_oauth_tokens','access_hash='+eq(hash(bearer[1]))+'&expires=gt.'+Date.now()+'&select=user_id,scopes&limit=1');
   if(!tokens.length){response(res,401,{error:'Invalid or expired OAuth token.'},{'WWW-Authenticate':'Bearer resource_metadata="'+site+'/.well-known/oauth-protected-resource"'});return true}
   const userId=tokens[0].user_id,scopes=String(tokens[0].scopes||'').split(' ');
-  const data=await body(req),rpcId=data.id;
+  const data=await body(req,false,300000),rpcId=data.id;
   const success=result=>response(res,200,{jsonrpc:'2.0',id:rpcId,result});
   const error=(code,message)=>response(res,200,{jsonrpc:'2.0',id:rpcId,error:{code,message}});
   if(data.method==='initialize'){success({protocolVersion:'2025-06-18',capabilities:{tools:{}},serverInfo:{name:'Forma Studio',version:'0.1.0'}});return true}
