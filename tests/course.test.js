@@ -37,7 +37,7 @@ test('Gemini errors and invalid output are useful and never saved',async t=>{
  const {state,tables,req}=await setup(t),source='Teaching material '.repeat(10),before=structuredClone(tables.forma_course_drafts);
  const cases=[
  [()=>new Response(JSON.stringify({error:{status:'RESOURCE_EXHAUSTED'}}),{status:429}),429,/Gemini (quota|rate)/],
- [()=>new Response('{}',{status:403}),502,/key/],
+ [()=>new Response('{}',{status:403}),503,/key/],
  [()=>{throw new DOMException('timeout','TimeoutError');},504,/timed out/],
  [()=>new Response('not json'),502,/invalid response/],
  [()=>new Response(JSON.stringify({candidates:[{finishReason:'MAX_TOKENS'}]})),502,/complete/],
