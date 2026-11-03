@@ -1,7 +1,7 @@
 # Forma Studio AI-first architecture (staging plan)
 
 ## Product
-One backend for (1) traditional visual editing, (2) on-site conversational assistant and (3) optional user-authorized ChatGPT connector. The interfaces never receive the Supabase service-role key.
+One provider-independent backend for (1) traditional visual editing, (2) an optional on-site AI assistant and (3) a user-authorized ChatGPT connector. Prioritize the ChatGPT path so instructors can use their own ChatGPT account for content generation; Gemini is optional for the on-site editor, not part of the connector's required request path. The interfaces never receive the Supabase service-role key.
 
 ## Authorization
 - Application session -> authenticated user -> account role -> resource ownership check on every action.
@@ -32,3 +32,9 @@ One backend for (1) traditional visual editing, (2) on-site conversational assis
 - Course pages may expose published text publicly; paid lesson gating needs a separate enforcement project.
 - No browser-tested purchase, renewal or cancellation demonstrated.
 - Staging only. Do not promote until authorization, payment and workflow tests are complete.
+
+## AI provider and cost strategy
+- ChatGPT users generate teaching/portfolio content in their own ChatGPT conversation. A user-authorized connector carries approved structured changes to Forma Studio; Forma Studio does not need to regenerate content with Gemini.
+- The connector does not automatically inherit the user's ChatGPT subscription API entitlements and does not eliminate Forma Studio server, data, file, hosting, payment, and security costs.
+- Keep an optional Gemini-backed in-site interpretation service as a separately controlled feature; no automatic fallback that spends API quota without explicit selection.
+- Instructor authorization through OAuth and an actual published ChatGPT connector are not implemented. Never expose database service keys or emulate external authorization with an admin token.
