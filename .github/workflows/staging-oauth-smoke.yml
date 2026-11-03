@@ -1,0 +1,22 @@
+name: Forma staging OAuth smoke
+on:
+  push:
+    branches: [forma-studio-test]
+    paths:
+      - 'oauth-mcp.js'
+      - 'cloud-server.js'
+      - 'tests/staging-smoke.mjs'
+      - '.github/workflows/staging-oauth-smoke.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  public-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node tests/staging-smoke.mjs
