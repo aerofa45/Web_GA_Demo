@@ -355,7 +355,7 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
         if(p==='/api/assistant/course-generation/commit'&&method==='POST'){
           const user=await auth(req);await requireInstructor(user);await rate(req,'generated-course-save:'+user.id,30);
           const b=await read(req),courseId=String(b.courseId||''),expected=b.expectedUpdated;
-          if(!/^[a-f0-9]{48}$/.test(courseId)||!Number.isSafeInteger(expected))throw new HttpError(400,'Select a valid course and preview version.');
+          if(!/^[a-f0-9]{48}$/.test(courseId)||!Number.isSafeInteger(expected)||b.confirm!==true)throw new HttpError(400,'Select a valid course, preview version, and explicitly confirm.');
           const rows=await store.rest('forma_course_drafts','id='+eq(courseId)+'&user_id='+eq(user.id)+'&select=id,title,outline,published,updated&limit=1');
           const course=rows[0];if(!course||course.outline?.archived)throw new HttpError(404,'Course not found.');
           if(course.published)throw new HttpError(409,'Unpublish this course before replacing its generated outline.');
