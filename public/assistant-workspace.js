@@ -1,6 +1,7 @@
 'use strict';
 (()=>{const $=id=>document.getElementById(id),domain=$('domain'),action=$('action'),course=$('course'),status=$('status');let pending=null;
 const portfolios=['experience','education','research','projects','publications'];
+let chatTurns=[];
 const ops={portfolio:portfolios.flatMap(x=>[{value:x+':add',label:'Add '+x},{value:x+':replace',label:'Edit '+x},{value:x+':remove',label:'Remove '+x}]),course:[{value:'rename-course',label:'Rename course'},{value:'add-chapter',label:'Add chapter'},{value:'rename-chapter',label:'Rename chapter'},{value:'add-lesson',label:'Add lesson'},{value:'edit-lesson',label:'Edit lesson'},{value:'remove-lesson',label:'Remove lesson'}]};
 function say(who,message){
  const container=$('conversation'),line=document.createElement('p');
@@ -63,7 +64,7 @@ $('interpret').onclick=async()=>{
  const request=$('natural-request').value.trim(),message=$('interpret-status');
  message.textContent='Interpreting request…';say('You',request);pending=null;$('apply').disabled=true;
  try{
-  const response=await api('/api/assistant/interpret',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({request,domain:domain.value})});
+  const response=await api('/api/assistant/interpret',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({request,domain:domain.value,history:chatTurns.slice(-8)})});
   const suggestion=response.suggestion;
   if(domain.value==='portfolio'){
    const candidate=suggestion.section+':'+suggestion.operation;
@@ -80,6 +81,8 @@ $('interpret').onclick=async()=>{
    $('chapter').value=Number.isInteger(suggestion.chapterIndex)?suggestion.chapterIndex+1:1;
    $('position').value=Number.isInteger(suggestion.lessonIndex)?suggestion.lessonIndex+1:1;
   }
+  chatTurns.push({role:'user',content:request},{role:'assistant',content:'Suggested '+suggestion.operation+' in '+domain.value+'; awaiting explicit preview and approval.'});
+  chatTurns=chatTurns.slice(-8);
   message.textContent='Suggested action populated. Check all fields, then click Preview change. No edits saved.';say('Assistant','I suggested '+suggestion.operation+' for '+domain.value+'. Review all populated fields and preview before saving.');
  }catch(e){message.textContent=e.message;say('Assistant','I could not interpret that request: '+e.message)}
 };
