@@ -142,6 +142,26 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
           await store.rest('forma_test_subscriptions','id='+eq(rows[0].id),'PATCH',{status,updated:Date.now()});
           return json(res,200,{received:true});
         }
+        if(['checkout.session.expired','checkout.session.async_payment_failed'].includes(event.type)){
+          const session=event.data?.object;
+          if(session?.livemode!==false||!/^cs_test_/.test(session.id||''))return json(res,200,{received:true});
+          const orders=await store.rest('forma_test_orders','checkout_session_id='+eq(session.id)+'&status=eq.pending&select=id&limit=1');
+          if(orders.length)await store.rest('forma_test_orders','id='+eq(orders[0].id)+'&status=eq.pending','PATCH',{status:event.type==='checkout.session.expired'?'expired':'failed'});
+          return json(res,200,{received:true});
+        }
+        if(event.type==='charge.refunded'){
+          const charge=event.data?.object,key=process.env.STRIPE_TEST_SECRET_KEY||'';
+          if(charge?.livemode!==false||!/^pi_/.test(charge.payment_intent||'')||!charge.refunded)return json(res,200,{received:true});
+          const lookup=await fetcher('https://api.stripe.com/v1/checkout/sessions?payment_intent='+encodeURIComponent(charge.payment_intent)+'&limit=10',{headers:{Authorization:'Bearer '+key},signal:AbortSignal.timeout(15000)});
+          if(!lookup.ok)throw new HttpError(502,'Unable to verify refunded Checkout session.');
+          const sessions=(await lookup.json()).data||[];
+          for(const session of sessions){
+            if(session.livemode!==false||!/^cs_test_/.test(session.id||''))continue;
+            const rows=await store.rest('forma_test_orders','checkout_session_id='+eq(session.id)+'&status=eq.paid&select=id&limit=1');
+            if(rows.length)await store.rest('forma_test_orders','id='+eq(rows[0].id)+'&status=eq.paid','PATCH',{status:'refunded'});
+          }
+          return json(res,200,{received:true,notice:'Refund recorded. Instructor-managed Drive permissions require separate revocation.'});
+        }
         if(!['checkout.session.completed','checkout.session.async_payment_succeeded'].includes(event.type))return json(res,200,{received:true});
         const session=event.data?.object;
         if(!session||session.livemode!==false||session.payment_status!=='paid'||typeof session.id!=='string')return json(res,200,{received:true});
@@ -223,6 +243,12 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
           if(!/^[a-f0-9]{48}$/.test(courseId))throw new HttpError(400,'Invalid course.');
           const rows=await store.rest('forma_test_subscriptions','course_id='+eq(courseId)+'&student_id='+eq(user.id)+'&select=status,updated&order=updated.desc&limit=1');
           return json(res,200,{status:rows[0]?.status||'none',testOnly:true});
+        }
+        if(p==='/api/stripe-test/order-status'&&method==='GET'){
+          const user=await auth(req),courseId=String(url.searchParams.get('courseId')||'');
+          if(!/^[a-f0-9]{48}$/.test(courseId))throw new HttpError(400,'Invalid course ID.');
+          const rows=await store.rest('forma_test_orders','course_id='+eq(courseId)+'&student_id='+eq(user.id)+'&select=id,status,amount_cents,currency,created,paid_at&order=created.desc&limit=20');
+          return json(res,200,{orders:rows,testOnly:true,accessRequiresInstructorApproval:true});
         }
         if(p==='/api/stripe-test/checkout'&&method==='POST'){
           const key=process.env.STRIPE_TEST_SECRET_KEY||'';
