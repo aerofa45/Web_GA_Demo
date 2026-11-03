@@ -264,7 +264,8 @@ test('AI-generated course is previewed, saved atomically, versioned and restored
  const old=structuredClone(tables.forma_course_drafts[0].outline);
  const newOutline={chapters:[{title:'Generated unit',lessons:[{title:'Probability fundamentals',type:'text',content:'A grounded explanation'}]}]};
  const route='/api/assistant/course-generation/commit';
- const args={courseId:cid,title:'AI course',outline:newOutline,expectedUpdated:1};
+ const args={courseId:cid,title:'AI course',outline:newOutline,expectedUpdated:1,confirm:true};
+ assert.equal((await req(route,{...args,confirm:false})).status,400);
  assert.equal((await req(route,args,false)).status,401);
  const preview=await req('/api/course-generate',{source:'Probability and statistics teaching notes. '.repeat(4)});
  assert.equal(preview.status,200);
@@ -329,6 +330,6 @@ test('AI assessment preview never persists and confirmed save is idempotent and 
 test('generation confirmation rejects published courses without unpublishing',async t=>{
  const {req,tables}=await setup(t);
  tables.forma_course_drafts[0].published=true;
- assert.equal((await req('/api/assistant/course-generation/commit',{courseId:cid,title:'Generated',outline:valid(),expectedUpdated:1})).status,409);
+ assert.equal((await req('/api/assistant/course-generation/commit',{courseId:cid,title:'Generated',outline:valid(),expectedUpdated:1,confirm:true})).status,409);
  assert.equal(tables.forma_course_drafts[0].title,'Original');
 });
