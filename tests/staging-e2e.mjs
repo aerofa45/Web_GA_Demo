@@ -31,7 +31,7 @@ assert.equal((await protectedResource.json()).resource,base+'/mcp');
 const anon=await request('/mcp',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/list'})});
 assert.equal(anon.status,401,'MCP tools must not be available anonymously');
 assert.match(anon.headers.get('www-authenticate')||'',/resource_metadata=/);
-for(const path of ['/api/assistant/history','/api/assistant/versions','/api/assistant/resources']){
+for(const path of ['/api/assistant/history','/api/assistant/versions','/api/assistant/catalog']){
  const r=await request(path);
  assert.equal(r.status,401,path+' must require authentication');
 }
