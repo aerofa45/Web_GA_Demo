@@ -730,18 +730,31 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
           await rate(req,'gemini:'+user.id,20,3600000);
           const instruction=scope==='course'?'Create 2-5 concise chapters.':'Return exactly one chapter with exactly '+b.target.lessons.length+' lessons, keeping each lesson type in this order: '+b.target.lessons.map(l=>l.type).join(', ')+'. Regenerate this target: '+JSON.stringify(b.target)+'.';
           const prompt=instruction+' '+'You are creating an editable educational course. Return ONLY JSON of shape {"chapters":[{"title":"...","lessons":[{"title":"...","type":"text","content":"..."},{"title":"...","type":"quiz","content":"Questions with answers"}]}]}. Ground every explanation only in supplied material. Never include markdown fences. Topic: '+topic+'\\nNotes: '+source;
-          let response;
-          try{response=await fetcher('https://generativelanguage.googleapis.com/v1beta/models/'+geminiModel+':generateContent',{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':apiKey},body:JSON.stringify({contents:[{parts:[{text:prompt},...(pdfPart?[pdfPart]:[])]}],generationConfig:{responseMimeType:'application/json'}}),signal:AbortSignal.timeout(45000)});
-          }catch(e){const timeout=['TimeoutError','AbortError'].includes(e.name);throw new HttpError(timeout?504:502,timeout?'Gemini timed out. Please try again.':'Could not reach Gemini. Please try again.');}
+          const geminiBody=JSON.stringify({contents:[{parts:[{text:prompt},...(pdfPart?[pdfPart]:[])]}],generationConfig:{responseMimeType:'application/json'}});
+          let response,connectionError;
+          for(let attempt=0;attempt<3;attempt++){
+            try{
+              response=await fetcher('https://generativelanguage.googleapis.com/v1beta/models/'+encodeURIComponent(geminiModel)+':generateContent',{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':apiKey},body:geminiBody,signal:AbortSignal.timeout(45000)});
+              connectionError=null;
+            }catch(e){connectionError=e;response=null;}
+            if(response?.ok)break;
+            if(attempt===2||response&&!([429,500,502,503,504].includes(response.status)))break;
+            let delay=700*(2**attempt);
+            const retryHeader=response?.headers?.get?.('retry-after');
+            if(retryHeader){const seconds=Number(retryHeader);if(Number.isFinite(seconds)&&seconds>=0)delay=Math.min(4000,seconds*1000);}
+            await new Promise(resolve=>setTimeout(resolve,delay));
+          }
+          if(!response){const timeout=['TimeoutError','AbortError'].includes(connectionError?.name);throw new HttpError(timeout?504:502,timeout?'Gemini timed out after retries. Try shorter notes.':'Could not reach Gemini after retries.');}
           if(!response.ok){
             const errorBody=await response.json().catch(()=>({}));
             const providerCode=String(errorBody.error?.status||'');
-            console.error('Gemini upstream status:',response.status,providerCode);
-            if(response.status===429)throw new HttpError(429,'Gemini rate limit or quota reached. Check Google AI Studio usage and billing.');
-            if(response.status===400)throw new HttpError(502,'Gemini rejected the request. The PDF or model input may be unsupported.');
-            if(response.status===401||response.status===403)throw new HttpError(502,'Gemini API key is invalid, restricted, or lacks permission.');
-            if(response.status===404)throw new HttpError(502,'The configured Gemini model is unavailable. Check GEMINI_MODEL against models available to this API key.');
-            throw new HttpError(502,'Gemini temporarily failed (HTTP '+response.status+').');
+            console.error('Gemini upstream status:',response.status,providerCode,'model:',geminiModel);
+            if(response.status===429)throw new HttpError(429,'Gemini quota or rate limit reached. Wait before retrying, or review your model quota in Google AI Studio.');
+            if(response.status===400)throw new HttpError(400,'Gemini rejected these notes or PDF. Try a smaller document or different input.');
+            if(response.status===401||response.status===403)throw new HttpError(503,'Gemini API key permissions or billing configuration need attention.');
+            if(response.status===404)throw new HttpError(503,'Gemini model '+geminiModel+' is unavailable for this key. Check GEMINI_MODEL and /api/gemini-models.');
+            if(response.status>=500)throw new HttpError(503,'Gemini is temporarily unavailable. Please try again later.');
+            throw new HttpError(502,'Gemini request failed. Please retry.');
           }
           const data=await response.json().catch(()=>{throw new HttpError(502,'Gemini returned an invalid response.');});
           if(data.promptFeedback?.blockReason||data.candidates?.[0]?.finishReason!=='STOP')throw new HttpError(502,'Gemini could not complete the outline. Try a smaller source or different material.');
