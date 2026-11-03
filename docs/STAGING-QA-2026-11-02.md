@@ -22,7 +22,9 @@ The deployed anonymous staging E2E script passed: workspace/assets, OAuth metada
 - Render service identity, repository and branch verified through connected Render tools.
 - Authenticated sign-in succeeded using the secure browser credential prompt.
 - Instructor Midnight, Daylight and Forest previews changed the rendered theme and URL.
-- Lesson navigation and keyboard tab switching worked. Classwork empty states rendered.
+- Lesson navigation and keyboard tab switching worked. Classwork empty states rendered. After rollout in the same browser session, the instructor preview heading and disabled completion controls were visibly verified.
+- A non-owner URL override (`?theme=daylight`) could not replace the saved Forest theme.
+- The existing instructor Google connection opened the real Drive picker; its cookie/storage access prompt was left untouched after approval review blocked acceptance.
 - A separate fictional QA instructor and student were registered through the application API. No existing user password or role was altered.
 - An isolated two-lesson QA course was published with Forest. The deployed API returned Forest to a non-owner; preview controls were hidden in the learner browser view.
 - A **$1.00 USD test payment** completed in Stripe Checkout's explicitly labelled sandbox, redirected to staging success, and the real webhook changed the matching database order from `pending` to `paid`.
@@ -31,7 +33,7 @@ The deployed anonymous staging E2E script passed: workspace/assets, OAuth metada
 
 ## Genuine blockers
 
-1. **Google OAuth approval:** automatic approval review rejected clicking “Verify email with Google”. Continuing requires explicit approval to verify the signed-in staging account for staging using `openid`, email and profile scopes. Real approved-student UI, quiz/submission/progress interactions, and provider-level Drive grant/playback/revocation remain unverified. No verification row was fabricated and no permission boundary was bypassed.
+1. **Google identity and picker permissions:** The Drive picker additionally requests cookie/storage access; automatic approval review blocked accepting that prompt because it may expose private Drive content. Explicit approval is needed for that prompt. **Google OAuth approval:** automatic approval review rejected clicking “Verify email with Google”. Continuing requires explicit approval to verify the signed-in staging account for staging using `openid`, email and profile scopes. Real approved-student UI, quiz/submission/progress interactions, and provider-level Drive grant/playback/revocation remain unverified. No verification row was fabricated and no permission boundary was bypassed.
 2. **Stripe sandbox mismatch:** staging Checkout identifies sandbox account `acct_1UXJ3tHVLY9TNyPY`; connected Stripe tools expose `acct_1UXUYxHOgobCVQyb` in test/live modes. Test-mode listing is empty and retrieving staging's Checkout session returns “No such checkout.session”. Connect the staging sandbox to finish real refund verification and provider-side webhook inspection. No webhook or key was changed on the unrelated connected account. Real subscription checkout remains blocked by Google student verification.
 
 ## Test fixture and continuation
@@ -41,4 +43,4 @@ QA student: `8e632b989fd77431f0c345425aa27750c6d644381815628c`.
 QA instructor: `e32cd71a8d894d790b17a11434b3d783aa8aa8e9b9fe5ab6`.
 Stripe test Checkout session: `cs_test_a1HWxAXE5bJKK4jyM4fSg2ZDddoGKSRuejwOTydNFTTcQSW2jOSFKuGqII`.
 
-The test order remains available for refund follow-up. No credentials, cookies, provider tokens or encryption keys are included in this report or committed to the repository.
+The isolated fictional QA course and test order remain available for refund follow-up. The latest application code was verified live at `8854e56071a791c8e22636d244bfb82c1eccf7b6`; all three regression workflows for that commit passed. The anonymous staging OAuth E2E check passed after the theme change. No credentials, cookies, provider tokens or encryption keys are included in this report or committed to the repository.
