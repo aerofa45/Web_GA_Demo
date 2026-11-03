@@ -45,15 +45,24 @@ async function oauthRoutes({req,res,p,method,url,store,current,origin,rate}){
   if(b.resource&&b.resource!==resource)problem(400,'Invalid OAuth resource.');
   const user=await current(req);
   if(!user){res.writeHead(401,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store'});res.end('<!doctype html><html><body><h1>Sign in to Forma Studio</h1><p>Sign in to your account in another tab, then reopen this authorization page. No access has been granted.</p><a href="/login?next='+encodeURIComponent('/oauth/authorize'+url.search)+'">Sign in</a></body></html>');return true}
+  // Bind the consent form cryptographically to the authenticated account and OAuth request.
+  // Browsers may discard the temporary consent cookie during cross-site OAuth redirects.
+  // A signed, short-lived form token prevents that from blocking consent without weakening CSRF protection.
+  const consentPayload=(data,userId)=>JSON.stringify([userId,data.client_id,data.redirect_uri,data.state,data.code_challenge,data.scope,data.resource||'',data.nonce,data.consent_expires]);
+  const consentSignature=(data,userId)=>crypto.createHmac('sha256',store.key).update(consentPayload(data,userId)).digest('base64url');
   if(method==='GET'){
-   const nonce=random();res.setHeader('Set-Cookie','forma_oauth_consent='+nonce+'; Path=/oauth/authorize; HttpOnly; Secure; SameSite=Lax; Max-Age=600');
+   const nonce=random();b.nonce=nonce;b.consent_expires=String(Date.now()+600000);b.consent_signature=consentSignature(b,user.id);res.setHeader('Set-Cookie','forma_oauth_consent='+nonce+'; Path=/oauth/authorize; HttpOnly; Secure; SameSite=Lax; Max-Age=600');
    const escape=x=>String(x).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-   const inputs=Object.entries({...b,scope:scopes,nonce}).filter(([k])=>['client_id','redirect_uri','response_type','code_challenge','code_challenge_method','state','scope','resource','nonce'].includes(k)).map(([k,v])=>'<input type="hidden" name="'+escape(k)+'" value="'+escape(v)+'">').join('');
+   const inputs=Object.entries({...b,scope:scopes}).filter(([k])=>['client_id','redirect_uri','response_type','code_challenge','code_challenge_method','state','scope','resource','nonce','consent_expires','consent_signature'].includes(k)).map(([k,v])=>'<input type="hidden" name="'+escape(k)+'" value="'+escape(v)+'">').join('');
    res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'"});
    res.end('<!doctype html><html><head><meta charset="utf-8"><title>Authorize Forma Studio</title></head><body style="font-family:system-ui;max-width:600px;margin:60px auto"><h1>Connect '+escape(client.client_name)+'</h1><p>Signed in as '+escape(user.email)+'. This app requests the following access (write scopes allow editing your content after confirmation): '+escape(scopes)+'. It will only see your own data. It cannot access administrator tools.</p><form method="post" action="/oauth/authorize">'+inputs+'<button type="submit" name="decision" value="approve">Approve access</button> <button type="submit" name="decision" value="deny">Deny</button></form></body></html>');return true;
   }
   const match=String(req.headers.cookie||'').match(/(?:^|;\s*)forma_oauth_consent=([A-Za-z0-9_-]+)/);
-  if(!match||match[1]!==b.nonce)problem(403,'OAuth consent expired. Reopen authorization.');
+  const expected=consentSignature(b,user.id);
+  const provided=String(b.consent_signature||'');
+  const signed=provided.length===expected.length&&crypto.timingSafeEqual(Buffer.from(provided),Buffer.from(expected));
+  const expires=Number(b.consent_expires);
+  if(!signed||!Number.isSafeInteger(expires)||expires<Date.now()||expires>Date.now()+600000||!b.nonce)problem(403,'OAuth consent expired. Reopen authorization.');
   res.setHeader('Set-Cookie','forma_oauth_consent=; Path=/oauth/authorize; HttpOnly; Secure; SameSite=Lax; Max-Age=0');
   const go=new URL(redirect);go.searchParams.set('state',b.state);go.searchParams.set('iss',issuer);
   if(b.decision!=='approve'){go.searchParams.set('error','access_denied');res.writeHead(302,{Location:go.toString(),'Cache-Control':'no-store'});res.end();return true}
