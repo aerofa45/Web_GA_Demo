@@ -12,7 +12,7 @@ test('OAuth PKCE, refresh, scoped MCP access and revocation',async t=>{
   forma_profiles:[{user_id:uid,data:{name:'Instructor',bio:'Owner biography',experience:[],education:[],research:[],projects:[],publications:[]},updated:123}],
   forma_account_roles:[{user_id:uid,role:'instructor'}],
   forma_course_drafts:[{id:cid,user_id:uid,title:'My class',published:false,outline:{chapters:[]},updated:123},{id:'e'.repeat(48),user_id:other,title:'Private other class',published:false,outline:{chapters:[]},updated:123}],
-  forma_oauth_clients:[],forma_oauth_codes:[],forma_oauth_tokens:[],forma_assignments:[],forma_quizzes:[],forma_assistant_audit:[]
+  forma_oauth_clients:[],forma_oauth_codes:[],forma_oauth_tokens:[],forma_assignments:[],forma_quizzes:[],forma_assistant_audit:[],forma_test_orders:[]
  };
  const store={key:'test-secret-key',url:'https://example.supabase.co',async rpc(name,args){
   if(name==='forma_limit'){rateCalls.push(args);return true;}
@@ -32,6 +32,7 @@ test('OAuth PKCE, refresh, scoped MCP access and revocation',async t=>{
   const p=new URLSearchParams(query),matches=r=>[...p].every(([k,v])=>['select','limit','order'].includes(k)||v.startsWith('eq.')&&String(r[k])===decodeURIComponent(v.slice(3))||v.startsWith('gt.')&&r[k]>Number(v.slice(3)));
   const rows=tables[table].filter(matches);
   if(method==='POST'){tables[table].push(structuredClone(payload));return null}
+  if(method==='PATCH'){for(const row of rows)Object.assign(row,structuredClone(payload));return null}
   if(method==='DELETE'){tables[table]=tables[table].filter(x=>!matches(x));return null}
   return structuredClone(rows).map(row=>p.has('select')&&p.get('select')!=='*'?Object.fromEntries(p.get('select').split(',').map(k=>[k,row[k]])):row);
  }};
@@ -48,6 +49,11 @@ test('OAuth PKCE, refresh, scoped MCP access and revocation',async t=>{
  const payload=JSON.stringify({id:'evt_test_fixture',type:'ping',livemode:false});
  const ts=Math.floor(Date.now()/1000),signature=crypto.createHmac('sha256',process.env.STRIPE_TEST_WEBHOOK_SECRET).update(ts+'.'+payload).digest('hex');
  const signed=await call('/api/stripe-test/webhook',{method:'POST',headers:{'stripe-signature':'t='+ts+',v1='+signature,'Content-Type':'application/json'},body:payload});assert.equal(signed.status,200,'Valid signed test webhook must be acknowledged');
+ const pendingOrder={id:'f'.repeat(48),course_id:cid,student_id:uid,amount_cents:500,currency:'usd',checkout_session_id:'cs_test_expired_fixture',status:'pending',created:Date.now()};
+ tables.forma_test_orders.push(pendingOrder);
+ const expiredBody=JSON.stringify({id:'evt_expired_fixture',type:'checkout.session.expired',data:{object:{id:'cs_test_expired_fixture',livemode:false}}});
+ const expiredSig=crypto.createHmac('sha256',process.env.STRIPE_TEST_WEBHOOK_SECRET).update(ts+'.'+expiredBody).digest('hex');
+ const expired=await call('/api/stripe-test/webhook',{method:'POST',headers:{'stripe-signature':'t='+ts+',v1='+expiredSig},body:expiredBody});assert.equal(expired.status,200);assert.equal(pendingOrder.status,'expired');
  const staleTs=ts-3600,staleSignature=crypto.createHmac('sha256',process.env.STRIPE_TEST_WEBHOOK_SECRET).update(staleTs+'.'+payload).digest('hex');
  const staleStripe=await call('/api/stripe-test/webhook',{method:'POST',headers:{'stripe-signature':'t='+staleTs+',v1='+staleSignature},body:payload});assert.equal(staleStripe.status,400,'Expired webhook signatures must be rejected');
  const authCookie='forma_session='+cookie;
