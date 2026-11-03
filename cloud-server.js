@@ -1,5 +1,6 @@
 'use strict';
 const http = require('node:http');
+const {oauthRoutes}=require('./oauth-mcp');
 const {validateOutline}=require('./course');
 const {applyGeneration}=require('./public/course-tools');
 const fs = require('node:fs/promises');
@@ -105,6 +106,7 @@ function createApp(store,{origin='',production=false,trustProxy=false,fetcher=fe
     if(production)res.setHeader('Strict-Transport-Security','max-age=31536000');
     try{
       const url=new URL(req.url,'http://localhost');const p=url.pathname;const method=req.method;
+      if(await oauthRoutes({req,res,p,method,url,store,current,rate,origin:origin||process.env.APP_ORIGIN||process.env.RENDER_EXTERNAL_URL||''}))return;
       if(!['GET','HEAD','POST','PUT','DELETE'].includes(method))throw new HttpError(405,'Method not allowed.');
       if(p==='/healthz'){await store.rest('forma_users','select=id&limit=0');return json(res,200,{status:'ok',mode:'portfolio-beta',payments:false});}
       // Test-only Stripe endpoint: verify the raw body before parsing JSON.
