@@ -28,6 +28,19 @@
   document.getElementById('content').append(panel);
  }
  const lms=document.createElement('section');lms.id='lms-student';document.getElementById('content').append(lms);const lmsScript=document.createElement('script');lmsScript.src='/lms-student.js';lmsScript.defer=true;document.body.append(lmsScript);
+ const tabLesson=document.getElementById('tab-lesson'),tabClasswork=document.getElementById('tab-classwork');
+ const lessonWorkspace=document.getElementById('lesson-workspace'),classwork=document.getElementById('content');
+ function showTab(which){
+  const isLesson=which==='lesson';
+  lessonWorkspace.hidden=!isLesson;classwork.hidden=isLesson;
+  tabLesson.setAttribute('aria-selected',String(isLesson));tabClasswork.setAttribute('aria-selected',String(!isLesson));
+  if(!isLesson)classwork.scrollIntoView({block:'nearest',behavior:'smooth'});
+ }
+ tabLesson.addEventListener('click',()=>showTab('lesson'));tabClasswork.addEventListener('click',()=>showTab('classwork'));
+ for(const tab of [tabLesson,tabClasswork])tab.addEventListener('keydown',event=>{
+  if(event.key!=='ArrowLeft'&&event.key!=='ArrowRight')return;
+  event.preventDefault();const target=tab===tabLesson?tabClasswork:tabLesson;target.focus();showTab(target===tabLesson?'lesson':'classwork');
+ });
  const chapters=data.course.outline.chapters||[],lessons=chapters.flatMap((chapter,ci)=>(chapter.lessons||[]).map((lesson,li)=>({lesson,chapter,ci,li})));
  const curriculum=document.getElementById('curriculum-list'),body=document.getElementById('lesson-content'),prev=document.getElementById('prev-lesson'),next=document.getElementById('next-lesson');
  const heading=document.getElementById('active-lesson-title'),counter=document.getElementById('lesson-count'),progress=document.getElementById('curriculum-progress');
@@ -47,7 +60,7 @@
   if(index<0||index>=lessons.length)return;
   current=index;const item=lessons[index],lesson=item.lesson;
   heading.textContent=lesson.title;counter.textContent='LESSON '+(index+1)+' OF '+lessons.length;
-  progress.textContent=lessons.length+' lessons • '+chapters.length+' sections';
+  progress.textContent='Viewing lesson '+(index+1)+' of '+lessons.length+' • '+chapters.length+' sections';
   progressFill.style.width=((index+1)/lessons.length*100)+'%';
   body.replaceChildren();
   if(lesson.type==='youtube'){
