@@ -114,6 +114,50 @@ $('save-generated').onclick=async()=>{
   await history();
  }catch(e){message.textContent=e.message;}
 };
+let assessmentsPending=null;
+function renderAssessments(items){
+ const area=$('assessment-preview');area.replaceChildren();
+ const head=(tag,content,parent=area)=>{const node=document.createElement(tag);node.textContent=String(content);parent.append(node);return node};
+ head('h3','Assignments ('+items.assignments.length+')');
+ for(const assignment of items.assignments){
+  head('h4',assignment.title);const para=head('p',assignment.instructions);para.style.whiteSpace='pre-wrap';
+ }
+ head('h3','Quizzes ('+items.quizzes.length+')');
+ for(const quiz of items.quizzes){
+  head('h4',quiz.title);
+  quiz.questions.forEach((q,i)=>{
+   head('p',(i+1)+'. '+q.prompt);
+   const list=document.createElement('ol');
+   for(const option of q.options){const li=document.createElement('li');li.textContent=option;list.append(li)}
+   area.append(list);
+   head('p','Correct answer: '+(q.correct+1)+' — '+q.options[q.correct]);
+  });
+ }
+ area.hidden=false;
+}
+$('generate-assessments').onclick=async()=>{
+ const status=$('assessment-status');assessmentsPending=null;$('save-assessments').disabled=true;
+ $('assessment-preview').hidden=true;status.textContent='Generating assignments and quizzes…';
+ try{
+  if(!course.value)throw Error('Select your course under Request a change first.');
+  const result=await api('/api/assistant/assessment-generation',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({courseId:course.value,notes:$('assessment-notes').value})});
+  assessmentsPending={courseId:result.courseId,assessments:result.assessments,previewToken:result.previewToken,confirm:true};
+  renderAssessments(result.assessments);
+  $('save-assessments').disabled=false;
+  status.textContent='Preview ready. Check question wording and every correct answer before saving.';
+  say('Assistant','Assignments and quizzes proposed. They are not yet saved.');
+ }catch(e){status.textContent=e.message;say('Assistant','Assessment generation failed: '+e.message)}
+};
+$('save-assessments').onclick=async()=>{
+ if(!assessmentsPending)return;
+ const pending=assessmentsPending;assessmentsPending=null;$('save-assessments').disabled=true;
+ try{
+  const result=await api('/api/assistant/assessment-generation/commit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(pending)});
+  $('assessment-status').textContent=result.replayed?'Assessments already saved; no duplicates created.':'Saved '+result.assignments+' assignment(s) and '+result.quizzes+' quiz(zes). Review them in Course Studio.';
+  say('Assistant','Your generated assessments were saved to the LMS.');
+  await history();
+ }catch(e){$('assessment-status').textContent=e.message}
+};
 async function loadVersions(){
  const data=await api('/api/assistant/versions'),box=$('restore-version');box.replaceChildren();
  for(const v of data.versions||[]){
