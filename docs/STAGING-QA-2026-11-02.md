@@ -34,7 +34,7 @@ The deployed anonymous staging E2E script passed: workspace/assets, OAuth metada
 ## Genuine blockers
 
 1. **Google authentication deferred:** The user approved student email/profile verification, but Google rejected the supplied password and the user no longer remembers that Google password. The second LMS account itself signed in successfully. At the user's request, Google-dependent tests are paused. Real approved-student UI and provider-level Drive playback/grant/removal remain unverified. The separate Drive picker cookie/storage prompt is also untouched. No verification row was fabricated and no permission boundary was bypassed.
-2. **Stripe sandbox mismatch:** staging Checkout identifies sandbox account `acct_1UXJ3tHVLY9TNyPY`; connected Stripe tools expose `acct_1UXUYxHOgobCVQyb` in test/live modes. Test-mode listing is empty and retrieving staging's Checkout session returns “No such checkout.session”. Connect the staging sandbox to finish real refund verification and provider-side webhook inspection. No webhook or key was changed on the unrelated connected account. Real subscription checkout remains blocked by Google student verification.
+2. **Real subscription checkout and previously approved enrollment revocation:** these still require Google student verification. The Stripe sandbox connection and real one-time refund webhook blocker are now resolved; see the final follow-up below. Real revocation of an already approved student's LMS/Drive access remains unverified.
 
 ## Test fixture and continuation
 
@@ -43,7 +43,7 @@ QA student: `8e632b989fd77431f0c345425aa27750c6d644381815628c`.
 QA instructor: `e32cd71a8d894d790b17a11434b3d783aa8aa8e9b9fe5ab6`.
 Stripe test Checkout session: `cs_test_a1HWxAXE5bJKK4jyM4fSg2ZDddoGKSRuejwOTydNFTTcQSW2jOSFKuGqII`.
 
-The isolated fictional QA course and test order remain available for refund follow-up. The earlier theme/UI application code was verified live at `8854e56071a791c8e22636d244bfb82c1eccf7b6`; all three regression workflows for that commit passed. The anonymous staging OAuth E2E check passed after the theme change. No credentials, cookies, provider tokens or encryption keys are included in this report or committed to the repository.
+The isolated fictional QA course remains available; both QA test orders are now fully refunded. The earlier theme/UI application code was verified live at `8854e56071a791c8e22636d244bfb82c1eccf7b6`; all three regression workflows for that commit passed. The anonymous staging OAuth E2E check passed after the theme change. No credentials, cookies, provider tokens or encryption keys are included in this report or committed to the repository.
 
 ## Follow-up: checks without Google authentication
 
@@ -63,7 +63,7 @@ Seven additional automated tests exposed four application issues, all fixed:
 
 Additional cases verify stale subscription events against current Stripe API state, reject live or unverifiable subscription responses, process asynchronous paid subscription checkout without automatic enrollment, and limit failed/expired checkout updates to pending orders. All provider calls in these new automated cases are test doubles; no Google login or live Stripe was used.
 
-The real Stripe refund test remains blocked by the mismatched connected sandbox. A Stripe account-management link was provided to connect the correct staging sandbox.
+At this earlier stage, the real Stripe refund test was blocked by the mismatched connected sandbox. This was subsequently resolved as recorded below.
 
 ### Post-deployment verification of the follow-up
 
@@ -71,4 +71,39 @@ Render confirmed commit `0889f7e46e0970f1a1724dc6582b23d2d4ae54d4` live on the s
 
 An additional authenticated hosted run passed **19 checks** with the existing fictional QA instructor/student accounts, using only LMS sessions and no Google authentication. It verified account roles and no admin role; owner reads; rejection of student course reads/edits/archival, pricing changes, enrollment approval, gradebook reads, submissions and lesson completion; per-student order history and enrollment status; cross-origin save denial; anonymous denial; unsigned webhook denial; disabled live-payment routes; and unchanged instructor course data after denied operations.
 
-After the user reported updating Stripe, the connection was refreshed. It still exposed `acct_1UXUYxHOgobCVQyb`; retrieving staging's existing test Checkout session again returned `No such checkout.session`. The matching sandbox connection remains the real-refund blocker as of this verification.
+An earlier refresh still exposed `acct_1UXUYxHOgobCVQyb` and returned `No such checkout.session`. The subsequent connection and refund retest below supersede that blocker.
+
+
+## Final follow-up: correct sandbox and real refund webhook verified
+
+The newly added Stripe connection exposes **EDU_INT sandbox**, account `acct_1UXJ3tHVLY9TNyPY`, with `livemode: false`. The existing staging Checkout session was successfully retrieved. All subsequent provider operations used that exact sandbox and test mode.
+
+The first $1.00 test payment was fully refunded in Stripe (`re_3UXYyjHVLY9TNyPY0AjwOOd8`, succeeded). Inspection found that the staging webhook endpoint `we_1UXUwfHVLY9TNyPYMsA1r7ey`, targeting `https://web-ga-demo.onrender.com/api/stripe-test/webhook`, was missing refund and subscription lifecycle events. Its existing event subscriptions were preserved and these were added:
+
+- `charge.refunded`
+- `customer.subscription.updated`
+- `customer.subscription.deleted`
+
+The initial refund occurred before the refund event subscription was corrected, so that isolated QA order (`bc456f84286862ee170642c289f4bdce8c60f0b80afcedab`) was manually reconciled from paid to refunded after verifying Stripe's successful full refund. This initial database transition is not claimed as a webhook result.
+
+A **fresh end-to-end retest then passed without any manual database update**:
+
+1. The QA student created a new $1.00 USD staging Checkout session and paid through Cloud Browser using Stripe's public test card in the explicitly labelled sandbox.
+2. Checkout returned to the staging QA course; Stripe reported paid and the actual payment webhook updated the matching order to paid.
+3. A full $1.00 refund succeeded through the connected sandbox.
+4. The actual refund webhook changed that fresh Forma order from paid to refunded.
+5. The student's order-status API returned refunded. The unenrolled student's gradebook request still returned HTTP 403, `Approved course enrollment required.`
+
+Evidence identifiers:
+
+| Item | Identifier |
+| --- | --- |
+| Fresh Checkout | `cs_test_a1fLd6hxgbxmgRWHqOFeIY4iCQxOJN97l60nXV3qk7kqiu0PFKkSALN8yf` |
+| Fresh order | `e106ba5507673f2a59ee1470f5f501f5806b3636ed449af2` |
+| Payment intent | `pi_3UXZf2HVLY9TNyPY0GKfua41` |
+| Successful full refund | `re_3UXZf2HVLY9TNyPY0MZZawPg` |
+| Refunded charge | `ch_3UXZf2HVLY9TNyPY0V9JaQzi` |
+
+This verifies real sandbox payment/refund processing and continued denial to an unenrolled student. It does **not** verify revocation of previously approved enrollment or actual Google Drive permissions: the QA student never had approved enrollment or a verified Google identity. Those provider-level checks, approved-student UI, and real subscription checkout remain paused pending Google authentication. The corresponding application logic has automated coverage.
+
+No application source changed in this final follow-up. The previously verified 48 automated tests, 19 authenticated hosted isolation checks and four passing workflows remain the application validation baseline. Only the staging sandbox webhook configuration and isolated QA test data changed. Production and live Stripe were untouched.
