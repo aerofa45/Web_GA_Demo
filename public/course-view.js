@@ -28,20 +28,49 @@
   document.getElementById('content').append(panel);
  }
  const lms=document.createElement('section');lms.id='lms-student';document.getElementById('content').append(lms);const lmsScript=document.createElement('script');lmsScript.src='/lms-student.js';lmsScript.defer=true;document.body.append(lmsScript);
- const root=document.getElementById('content'),text=(tag,value)=>{const node=document.createElement(tag);node.textContent=value;return node;};
- for(const c of data.course.outline.chapters){const section=document.createElement('section');section.append(text('h2',c.title));for(const l of c.lessons){const article=document.createElement('article');article.append(text('h3',l.title));if(l.type==='youtube'){
- const video=CourseTools.youtubeId(l.content);if(video){const frame=document.createElement('iframe');frame.src='https://www.youtube-nocookie.com/embed/'+video;frame.title=l.title;frame.loading='lazy';frame.allow='fullscreen; encrypted-media; picture-in-picture';frame.referrerPolicy='strict-origin-when-cross-origin';article.append(frame);}else article.append(text('p','Video URL unavailable.'));
- }else article.append(text('p',l.content));
- if(l.hasDriveVideo){
-  const privateLink=text('button','Open private Drive video');privateLink.type='button';
-  privateLink.addEventListener('click',async()=>{
-   const tab=window.open('about:blank','_blank');
-   try{
-    const r=await fetch('/api/course-video/'+id+'/'+data.course.outline.chapters.indexOf(c)+'/'+c.lessons.indexOf(l),{credentials:'same-origin'});
-    const result=await r.json();if(!r.ok)throw Error(result.error||'Video unavailable');
-    if(tab){tab.opener=null;tab.location.replace(result.url);}else{const link=text('a','Open Google Drive video');link.href=result.url;link.target='_blank';link.rel='noopener noreferrer';article.append(link);}
-   }catch(e){if(tab)tab.close();const m=text('p',e.message);article.append(m);}
-  });article.append(privateLink);
+ const chapters=data.course.outline.chapters||[],lessons=chapters.flatMap((chapter,ci)=>(chapter.lessons||[]).map((lesson,li)=>({lesson,chapter,ci,li})));
+ const curriculum=document.getElementById('curriculum-list'),body=document.getElementById('lesson-content'),prev=document.getElementById('prev-lesson'),next=document.getElementById('next-lesson');
+ const heading=document.getElementById('active-lesson-title'),counter=document.getElementById('lesson-count'),progress=document.getElementById('curriculum-progress');
+ const progressFill=document.getElementById('curriculum-progress-fill'),nodes=[];
+ const text=(tag,value)=>{const node=document.createElement(tag);node.textContent=value;return node;};
+ let current=0;
+ chapters.forEach((chapter,ci)=>{
+  const group=document.createElement('div');group.className='learn-chapter';
+  const title=text('div',chapter.title);title.className='learn-chapter-title';group.append(title);
+  (chapter.lessons||[]).forEach((lesson,li)=>{
+   const index=lessons.findIndex(item=>item.ci===ci&&item.li===li),button=document.createElement('button');button.type='button';button.className='learn-lesson-link';
+   const number=text('span',String(index+1).padStart(2,'0'));number.className='learn-lesson-number';
+   button.append(number,text('span',lesson.title));button.addEventListener('click',()=>select(index));group.append(button);nodes[index]=button;
+  });curriculum.append(group);
+ });
+ function select(index){
+  if(index<0||index>=lessons.length)return;
+  current=index;const item=lessons[index],lesson=item.lesson;
+  heading.textContent=lesson.title;counter.textContent='LESSON '+(index+1)+' OF '+lessons.length;
+  progress.textContent=lessons.length+' lessons • '+chapters.length+' sections';
+  progressFill.style.width=((index+1)/lessons.length*100)+'%';
+  body.replaceChildren();
+  if(lesson.type==='youtube'){
+   const video=CourseTools.youtubeId(lesson.content);
+   if(video){const frame=document.createElement('iframe');frame.src='https://www.youtube-nocookie.com/embed/'+video;frame.title=lesson.title;frame.loading='lazy';frame.allow='fullscreen; encrypted-media; picture-in-picture';frame.referrerPolicy='strict-origin-when-cross-origin';body.append(frame);}
+   else body.append(text('p','Video URL unavailable.'));
+  }else body.append(text('p',lesson.content||'Lesson content coming soon.'));
+  if(lesson.hasDriveVideo){
+   const button=text('button','Open private Drive video');button.type='button';button.className='learn-btn';
+   button.addEventListener('click',async()=>{const tab=window.open('about:blank','_blank');try{
+    const r=await fetch('/api/course-video/'+id+'/'+item.ci+'/'+item.li,{credentials:'same-origin'}),result=await r.json();
+    if(!r.ok)throw Error(result.error||'Video unavailable');if(tab){tab.opener=null;tab.location.replace(result.url);}
+    else{const link=text('a','Open Google Drive video');link.href=result.url;link.target='_blank';link.rel='noopener noreferrer';body.append(link);}
+   }catch(e){if(tab)tab.close();body.append(text('p',e.message));}});
+   body.append(button);
+  }
+  if(data.owner&&lesson.pdfId){const link=text('a','View instructor PDF');link.href='/api/course-pdf/'+lesson.pdfId;link.target='_blank';link.rel='noopener';body.append(link);}
+  nodes.forEach((node,i)=>{if(node){if(i===index)node.setAttribute('aria-current','step');else node.removeAttribute('aria-current');}});
+  prev.disabled=index===0;next.disabled=index===lessons.length-1;
+  try{history.replaceState(null,'',location.pathname+'?lesson='+(index+1));}catch(e){}
  }
- if(data.owner&&l.pdfId){const link=text('a','View instructor PDF');link.href='/api/course-pdf/'+l.pdfId;link.target='_blank';link.rel='noopener';article.append(link);}section.append(article);}root.append(section);}
+ prev.addEventListener('click',()=>select(current-1));next.addEventListener('click',()=>select(current+1));
+ if(lessons.length){const requested=Number(new URLSearchParams(location.search).get('lesson'));select(Number.isInteger(requested)&&requested>=1&&requested<=lessons.length?requested-1:0);}
+ else{heading.textContent='No lessons yet';body.append(text('p','The instructor has not added lessons to this course.'));prev.disabled=true;next.disabled=true;}
+
  }catch(e){status.textContent=e.message;}})();
