@@ -37,6 +37,7 @@ async function oauthRoutes({req,res,p,method,url,store,current,origin,rate}){
  }
  if(p==='/oauth/authorize'&&['GET','POST'].includes(method)){
   const b=method==='GET'?Object.fromEntries(url.searchParams.entries()):await body(req,true);
+  if(method==='POST')console.info('Forma OAuth consent POST received',{contentType:String(req.headers['content-type']||'').split(';')[0],contentLength:Number(req.headers['content-length']||0),hasClientId:!!b.client_id,hasRedirectUri:!!b.redirect_uri,hasConsentSignature:!!b.consent_signature,hasDecision:!!b.decision,fieldCount:Object.keys(b).length});
   const cid=String(b.client_id||''),redirect=String(b.redirect_uri||'');
   const client=await findClient(cid);
   if(!client||!clientRedirect(client,redirect))problem(400,'Unknown OAuth client or redirect URI.');
