@@ -126,8 +126,8 @@ function createApp(store,{origin='',production=false,trustProxy=false}={}){
       if(!['GET','HEAD'].includes(method))throw new HttpError(405,'Method not allowed.');
       if(p==='/robots.txt'){res.writeHead(200,{'Content-Type':'text/plain'});return res.end('User-agent: *\nDisallow: /app\nDisallow: /api/\nDisallow: /login\nDisallow: /register\n');}
       const routes=['/','/app','/login','/register','/privacy'];const isPage=routes.includes(p)||/^\/u\/[a-z0-9-]+$/.test(p);
-      if(!isPage&&!['/app.js','/style.css'].includes(p))throw new HttpError(404,'Not found.');
-      let content=await fs.readFile(path.join(ROOT,isPage?'index.html':p.slice(1)));const type=isPage?'text/html; charset=utf-8':p.endsWith('.js')?'text/javascript; charset=utf-8':'text/css; charset=utf-8';
+      if(!isPage&&!['/app.js','/style.css','/ecg-zhou.html','/ecg-zhou.js'].includes(p))throw new HttpError(404,'Not found.');
+      let content=await fs.readFile(path.join(ROOT,isPage?'index.html':p.slice(1)));const type=(isPage||p.endsWith('.html'))?'text/html; charset=utf-8':p.endsWith('.js')?'text/javascript; charset=utf-8':'text/css; charset=utf-8';
       if(isPage){let title='Forma Studio — Your portfolio, your space',description='Build and publish a personal portfolio with customizable pages and images.';if(p.startsWith('/u/')){const slug=p.slice(3),data=slug==='demo'?demo:await profile((await userBySlug(slug)).id);title=data.name+' | Portfolio';description=clean(data.bio,160);}let base=origin||(production?process.env.RENDER_EXTERNAL_URL:'');content=content.toString().replace('__TITLE__',escape(title)).replaceAll('__DESCRIPTION__',escape(description)).replace('__CANONICAL__',base?`<link rel="canonical" href="${escape(base+p)}">`:'');}
       res.writeHead(200,{'Content-Type':type,'Cache-Control':isPage?'no-cache':'public, max-age=300'});return res.end(method==='HEAD'?undefined:content);
     }catch(e){const status=e.status||500;if(status>=500)console.error('Forma request failed:',e.name);if(!res.headersSent)return json(res,status,{error:status===500?'Something went wrong. Please try again.':e.message});res.end();}
