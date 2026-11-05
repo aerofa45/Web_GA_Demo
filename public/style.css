@@ -54,3 +54,17 @@
 .content-editor {border-radius:16px;overflow:hidden}.content-editor>.muted{padding:0 16px}.content-editor .entry{border-left:3px solid var(--accent,#72ead3);padding:18px;margin:14px 0;border-radius:12px}.entry-meta{font-size:.88rem;line-height:1.65;opacity:.8;margin:12px 0}.rich-entry{min-width:0}.rich-entry>.entry-meta,.rich-entry>p{padding:0 18px}.rich-entry video{width:100%;border-radius:12px}.articleentry{max-width:850px}.portfolio-table th{text-align:left}.portfolio-table td{vertical-align:top}.portfolio-table td p{font-size:.85rem;opacity:.7}
 
 .skip-link{position:absolute;left:1rem;top:-100px;z-index:1000;padding:12px;background:#fff;color:#07121d}.skip-link:focus{top:1rem}:focus-visible{outline:3px solid #f7c96e;outline-offset:4px}@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important;animation:none!important}}
+
+
+/* Proposed Models dropdown — reusable for additional research animations */
+#public-portfolio .subnav:has(.model-nav),#preview-portfolio .subnav:has(.model-nav){overflow:visible;flex-wrap:wrap;row-gap:3px}
+.model-nav{position:relative;flex:0 0 auto;align-self:center}
+.model-nav>summary{display:block;list-style:none;cursor:pointer;font-weight:700;white-space:nowrap;padding:12px 16px;border-radius:9px}
+.model-nav>summary::-webkit-details-marker{display:none}
+.model-nav>summary span{margin-left:5px;font-size:11px}
+.model-nav[open]>summary{background:var(--accent);color:#07111c!important}
+.model-nav-menu{position:absolute;left:0;top:calc(100% + 8px);min-width:265px;max-width:min(390px,90vw);z-index:50;border:1px solid var(--border,#34506a);border-radius:14px;background:var(--surface2,#101f2c);box-shadow:0 15px 40px #0007;padding:8px;display:grid;gap:3px}
+.model-nav-menu a,.model-nav-menu button{display:block;text-align:left;color:var(--text,#e9f2f6)!important;border:0;background:transparent;border-radius:9px;padding:11px 12px;font-size:13px;white-space:normal;text-decoration:none;line-height:1.35}
+.model-nav-menu a:hover,.model-nav-menu button:hover{background:color-mix(in srgb,var(--accent) 18%,transparent);color:var(--accent)!important}
+.model-nav-menu .model-nav-overview{font-weight:800;border-bottom:1px solid var(--border,#34506a);border-radius:6px 6px 0 0}
+@media(max-width:760px){.model-nav-menu{left:auto;right:0;min-width:min(270px,90vw)}.model-nav>summary{padding:10px 12px}}
